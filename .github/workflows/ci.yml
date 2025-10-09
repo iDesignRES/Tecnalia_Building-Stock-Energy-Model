@@ -30,10 +30,8 @@ jobs:
       - name: Install dependencies
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          cd ./"Building Energy Simulation Model"
           poetry install
 
       - name: Run tests Building Energy Stock
         run: |
-          cd ./"Building Energy Simulation Model"
           poetry run pytest
