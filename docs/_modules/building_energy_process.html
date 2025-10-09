@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>building_energy_process &#8212; iDesignRES - Building Stock Energy Model 0.9.3 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <script src="../_static/documentation_options.js?v=0e439607"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for building_energy_process</h1><div class="highlight"><pre>
+<span></span><span class="c1"># This program is free software; you can redistribute it and/or modify</span>
+<span class="c1"># it under the terms of the GNU General Public License as published by</span>
+<span class="c1"># the Free Software Foundation; either version 2 of the License, or</span>
+<span class="c1"># (at your option) any later version.</span>
+<span class="c1">#</span>
+<span class="c1"># This program is distributed in the hope that it will be useful,</span>
+<span class="c1"># but WITHOUT ANY WARRANTY; without even the implied warranty of</span>
+<span class="c1"># MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the</span>
+<span class="c1"># GNU General Public License for more details.</span>
+<span class="c1">#</span>
+<span class="c1"># You should have received a copy of the GNU General Public License</span>
+<span class="c1"># along with this program; if not, write to the Free Software</span>
+<span class="c1"># Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.</span>
+<span class="c1">#</span>
+<span class="c1"># Copyright (c) 2025 Tecnalia Research &amp; Innovation</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">modules</span><span class="w"> </span><span class="kn">import</span> <span class="n">constants</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">modules</span><span class="w"> </span><span class="kn">import</span> <span class="n">model</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">modules</span><span class="w"> </span><span class="kn">import</span> <span class="n">validator</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+
+<span class="c1"># Function: Format the Hourly results</span>
+<div class="viewcode-block" id="formatHourlyResults">
+<a class="viewcode-back" href="../modules.html#building_energy_process.formatHourlyResults">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">formatHourlyResults</span><span class="p">(</span><span class="n">dictHourlyResults</span><span class="p">,</span> <span class="n">archetypes</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Function to format the Hourly results.</span>
+<span class="sd">    Input parameters:</span>
+<span class="sd">        dictHourlyResults: dict -&gt; The dictionary corresponding to he Hourly results.</span>
+<span class="sd">        archetypes: list -&gt; The list of building uses.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+
+    <span class="n">formattedOutput</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">arch</span> <span class="ow">in</span> <span class="n">archetypes</span><span class="p">:</span>
+        <span class="n">formattedOutput</span><span class="p">[</span><span class="n">arch</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">dictHourlyResults</span><span class="p">[</span><span class="n">arch</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="n">datetimeConverted</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span>
+                <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Datetime&#39;</span><span class="p">],</span> <span class="s1">&#39;</span><span class="si">%d</span><span class="s1">/%m/%Y %H:%M&#39;</span><span class="p">)</span>
+            <span class="n">dictConverted</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;Datetime&#39;</span><span class="p">:</span> <span class="n">datetimeConverted</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1"> %H:%M&#39;</span><span class="p">),</span>
+                <span class="s1">&#39;Solids|Coal&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Solids|Coal&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Liquids|Gas&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Liquids|Gas&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Liquids|Oil&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Liquids|Oil&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Gases|Gas&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Gases|Gas&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Solids|Biomass&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Solids|Biomass&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Electricity&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Electricity&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Heat&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Heat&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Liquids|Biomass&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Liquids|Biomass&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Gases|Biomass&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Gases|Biomass&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Hydrogen&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Hydrogen&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Heat|Solar&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Heat|Solar&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Variable cost [€/KWh]&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Variable cost [€/KWh]&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;Emissions [KgCO2/KWh]&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s1">&#39;Emissions [kgCO2/KWh]&#39;</span><span class="p">]</span>
+            <span class="p">}</span>
+            <span class="n">formattedOutput</span><span class="p">[</span><span class="n">arch</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dictConverted</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">formattedOutput</span></div>
+
+
+
+<span class="c1"># Function: Execute the Model</span>
+<div class="viewcode-block" id="executeModel">
+<a class="viewcode-back" href="../modules.html#building_energy_process.executeModel">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">executeModel</span><span class="p">(</span><span class="n">modelPayload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Function to execute the Buildings Stock Energy Model.</span>
+<span class="sd">    Input parameters:</span>
+<span class="sd">        modelPayload: dict -&gt; The dictionary with the Model input payload.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  Executing the Buildings Stock Energy Model (please wait)...&#39;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfCsv</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep01</span><span class="p">(</span><span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">tempsPath</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep02</span><span class="p">(</span>
+        <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;year&#39;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">radPath</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep03</span><span class="p">(</span>
+        <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;year&#39;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">tempsPath</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">radPath</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s1">&#39;Main/&gt;  There is no data on radiation and/or temperatures!&#39;</span><span class="p">)</span>
+    <span class="n">dfDHW</span><span class="p">,</span> <span class="n">dfYears</span><span class="p">,</span> <span class="n">dfSectors</span><span class="p">,</span> <span class="n">dfSeasons</span><span class="p">,</span> \
+        <span class="n">dfTemperatures</span><span class="p">,</span> <span class="n">dfSchedule</span><span class="p">,</span> <span class="n">dfResHHTes</span><span class="p">,</span> \
+        <span class="n">dfSerHHTes</span><span class="p">,</span> <span class="n">dfUvalues</span><span class="p">,</span> <span class="n">dfRetroUvalues</span><span class="p">,</span> \
+        <span class="n">dfACH</span><span class="p">,</span> <span class="n">dfBaseTemperatures</span><span class="p">,</span> <span class="n">dfCalendar</span><span class="p">,</span> \
+        <span class="n">dfBesCapex</span><span class="p">,</span> <span class="n">dfBesOpex</span><span class="p">,</span> <span class="n">dfRes</span><span class="p">,</span> <span class="n">dfBesCapacity</span><span class="p">,</span> \
+        <span class="n">dfRetroCost</span><span class="p">,</span> <span class="n">dfSolarOffice</span><span class="p">,</span> <span class="n">dfSolarNoffice</span><span class="p">,</span> \
+        <span class="n">dfDwellings</span><span class="p">,</span> <span class="n">dfRTHHEff</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep04</span><span class="p">(</span><span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+                                                          <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;scenario&#39;</span><span class="p">][</span><span class="s1">&#39;hdd_reduction&#39;</span><span class="p">],</span>
+                                                          <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;scenario&#39;</span><span class="p">][</span><span class="s1">&#39;cdd_reduction&#39;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep05</span><span class="p">(</span><span class="n">dfCsv</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep06</span><span class="p">(</span><span class="n">dfCsv</span><span class="p">,</span>
+                                       <span class="n">dfDHW</span><span class="p">,</span>
+                                       <span class="n">dfYears</span><span class="p">,</span>
+                                       <span class="n">dfSectors</span><span class="p">,</span>
+                                       <span class="n">dfDwellings</span><span class="p">,</span>
+                                       <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+                                       <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;scenario&#39;</span><span class="p">][</span><span class="s1">&#39;increase_residential_built_area&#39;</span><span class="p">],</span>
+                                       <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;scenario&#39;</span><span class="p">][</span><span class="s1">&#39;increase_service_built_area&#39;</span><span class="p">])</span>
+    <span class="k">del</span> <span class="n">dfYears</span><span class="p">,</span> <span class="n">dfSectors</span><span class="p">,</span> <span class="n">dfDwellings</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep07</span><span class="p">(</span><span class="n">dfCsv</span><span class="p">,</span>
+                                       <span class="n">dfResHHTes</span><span class="p">,</span>
+                                       <span class="n">dfSerHHTes</span><span class="p">,</span>
+                                       <span class="n">dfRTHHEff</span><span class="p">,</span>
+                                       <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+                                       <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;scenario&#39;</span><span class="p">][</span><span class="s1">&#39;active_measures&#39;</span><span class="p">],</span>
+                                       <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;scenario&#39;</span><span class="p">][</span><span class="s1">&#39;active_measures_baseline&#39;</span><span class="p">],</span>
+                                       <span class="n">constants</span><span class="o">.</span><span class="n">BUILDING_USES</span><span class="p">)</span>
+    <span class="k">del</span> <span class="n">dfResHHTes</span><span class="p">,</span> <span class="n">dfSerHHTes</span><span class="p">,</span> <span class="n">dfRTHHEff</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep08</span><span class="p">(</span>
+        <span class="n">dfCsv</span><span class="p">,</span> <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;scenario&#39;</span><span class="p">][</span><span class="s1">&#39;passive_measures&#39;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep09</span><span class="p">(</span><span class="n">dfCsv</span><span class="p">,</span>
+                                       <span class="n">dfDHW</span><span class="p">,</span>
+                                       <span class="n">dfUvalues</span><span class="p">,</span>
+                                       <span class="n">dfRetroUvalues</span><span class="p">,</span>
+                                       <span class="n">dfACH</span><span class="p">,</span>
+                                       <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+    <span class="k">del</span> <span class="n">dfDHW</span><span class="p">,</span> <span class="n">dfUvalues</span><span class="p">,</span> <span class="n">dfRetroUvalues</span><span class="p">,</span> <span class="n">dfACH</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep10</span><span class="p">(</span><span class="n">dfInput</span><span class="p">,</span> <span class="n">dfBesCapex</span><span class="p">)</span>
+    <span class="k">del</span> <span class="n">dfBesCapex</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep11</span><span class="p">(</span><span class="n">dfInput</span><span class="p">,</span> <span class="n">dfBesOpex</span><span class="p">)</span>
+    <span class="k">del</span> <span class="n">dfBesOpex</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep12</span><span class="p">(</span><span class="n">dfInput</span><span class="p">,</span> <span class="n">dfRetroCost</span><span class="p">)</span>
+    <span class="k">del</span> <span class="n">dfRetroCost</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep13</span><span class="p">(</span><span class="n">dfInput</span><span class="p">,</span> <span class="n">dfRes</span><span class="p">)</span>
+    <span class="k">del</span> <span class="n">dfRes</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep14</span><span class="p">(</span>
+        <span class="n">dfInput</span><span class="p">,</span> <span class="n">dfBesCapacity</span><span class="p">,</span> <span class="n">constants</span><span class="o">.</span><span class="n">BUILDING_USES</span><span class="p">)</span>
+    <span class="k">del</span> <span class="n">dfBesCapacity</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep15</span><span class="p">(</span><span class="n">dfInput</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfInput</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep16</span><span class="p">(</span><span class="n">dfInput</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dictSchedule</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep17</span><span class="p">(</span><span class="n">dfInput</span><span class="p">,</span>
+                                            <span class="n">dfSchedule</span><span class="p">,</span>
+                                            <span class="n">dfTemperatures</span><span class="p">,</span>
+                                            <span class="n">dfBaseTemperatures</span><span class="p">,</span>
+                                            <span class="n">dfSolarOffice</span><span class="p">,</span>
+                                            <span class="n">dfSolarNoffice</span><span class="p">,</span>
+                                            <span class="n">modelPayload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+    <span class="k">del</span> <span class="n">dfTemperatures</span><span class="p">,</span> <span class="n">dfBaseTemperatures</span><span class="p">,</span> <span class="n">dfSolarOffice</span><span class="p">,</span> <span class="n">dfSolarNoffice</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dictSchedule</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep18</span><span class="p">(</span><span class="n">dfInput</span><span class="p">,</span> <span class="n">dictSchedule</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dfAnualResults</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep19</span><span class="p">(</span><span class="n">dfInput</span><span class="p">,</span> <span class="n">dictSchedule</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dictConsolidated</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">arch</span> <span class="ow">in</span> <span class="n">constants</span><span class="o">.</span><span class="n">BUILDING_USES</span><span class="p">:</span>
+        <span class="n">dictConsolidated</span><span class="p">[</span><span class="n">arch</span><span class="p">]</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep20</span><span class="p">(</span><span class="n">dictSchedule</span><span class="p">,</span> <span class="n">arch</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="n">dictHourlyResults</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">arch</span> <span class="ow">in</span> <span class="n">constants</span><span class="o">.</span><span class="n">BUILDING_USES</span><span class="p">:</span>
+        <span class="n">dictHourlyResults</span><span class="p">[</span><span class="n">arch</span><span class="p">]</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">executeModelStep21</span><span class="p">(</span>
+            <span class="n">dfInput</span><span class="p">,</span> <span class="n">dictSchedule</span><span class="p">,</span> <span class="n">arch</span><span class="p">)</span>
+    <span class="k">del</span> <span class="n">dictSchedule</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">formatHourlyResults</span><span class="p">(</span><span class="n">dictHourlyResults</span><span class="p">,</span> <span class="n">constants</span><span class="o">.</span><span class="n">BUILDING_USES</span><span class="p">)</span></div>
+
+
+
+<span class="c1"># Function: Execute the Building Energy Simulation process</span>
+<div class="viewcode-block" id="executeBuildingEnergySimulationProcess">
+<a class="viewcode-back" href="../modules.html#building_energy_process.executeBuildingEnergySimulationProcess">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">executeBuildingEnergySimulationProcess</span><span class="p">(</span><span class="n">processPayload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">startTime</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">endTime</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">buildingUse</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Function to execute the Building Energy Simulation process.</span>
+<span class="sd">    Input parameters:</span>
+<span class="sd">        processPayload: dict -&gt; The dictionary with the process input payload.</span>
+<span class="sd">        startTime: text -&gt; The start datetime.</span>
+<span class="sd">        endTime: text -&gt; The end datetime.</span>
+<span class="sd">        buildingUse: text -&gt; The archetype (building use).</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Execute the Model</span>
+        <span class="nb">print</span><span class="p">(</span>
+            <span class="s1">&#39;Main/&gt;  *** Building Energy Simulation process [version &#39;</span> <span class="o">+</span> <span class="n">constants</span><span class="o">.</span><span class="n">VERSION</span> <span class="o">+</span> <span class="s1">&#39;] ***&#39;</span><span class="p">)</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">executeModel</span><span class="p">(</span><span class="n">processPayload</span><span class="p">)</span>
+
+        <span class="c1"># Move the resulting Excel file to the proper directory (if allowed)</span>
+        <span class="k">if</span> <span class="n">constants</span><span class="o">.</span><span class="n">SAVE_RESULT_ALLOWED</span><span class="p">:</span>
+            <span class="n">shutil</span><span class="o">.</span><span class="n">move</span><span class="p">(</span><span class="s1">&#39;temporary/result.xlsx&#39;</span><span class="p">,</span> <span class="s1">&#39;usecases/results/&#39;</span> <span class="o">+</span>
+                        <span class="n">processPayload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;.xlsx&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Remove all the temporary files</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  Removing all the temporary files...&#39;</span><span class="p">)</span>
+        <span class="n">directory</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s1">&#39;temporary&#39;</span>
+        <span class="k">for</span> <span class="n">fileInDirectory</span> <span class="ow">in</span> <span class="n">directory</span><span class="o">.</span><span class="n">iterdir</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">fileInDirectory</span><span class="o">.</span><span class="n">is_file</span><span class="p">()</span> <span class="ow">and</span> <span class="n">fileInDirectory</span><span class="o">.</span><span class="n">name</span> <span class="o">!=</span> <span class="s1">&#39;README.md&#39;</span><span class="p">:</span>
+                <span class="n">fileInDirectory</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>
+
+        <span class="c1"># Return the result (filtered)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">output</span><span class="p">[</span><span class="n">buildingUse</span><span class="p">])</span>
+        <span class="n">result</span><span class="p">[</span><span class="s1">&#39;Datetime&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;Datetime&#39;</span><span class="p">])</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span>
+            <span class="n">startTime</span><span class="p">,</span> <span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1">T%H:%M:%S&#39;</span><span class="p">))</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">endTime</span><span class="p">,</span> <span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1">T%H:%M:%S&#39;</span><span class="p">))</span>
+        <span class="n">resultFiltered</span> <span class="o">=</span> <span class="n">result</span><span class="p">[(</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;Datetime&#39;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">start</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span>
+            <span class="n">result</span><span class="p">[</span><span class="s1">&#39;Datetime&#39;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">end</span><span class="p">)]</span>
+        <span class="n">negativeValues</span> <span class="o">=</span> <span class="n">validator</span><span class="o">.</span><span class="n">validateProcessOutput</span><span class="p">(</span><span class="n">resultFiltered</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  Validating the output...&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">negativeValues</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  The output contains negative values!&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  The output has no negative values.&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  [OK]&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">resultFiltered</span><span class="o">.</span><span class="n">to_dict</span><span class="p">(</span><span class="n">orient</span><span class="o">=</span><span class="s1">&#39;list&#39;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  An error occurred executing the Building Energy Simulation process!&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">error</span><span class="p">)</span></div>
+
+
+
+<span class="c1"># Function: Main</span>
+<div class="viewcode-block" id="main">
+<a class="viewcode-back" href="../modules.html#building_energy_process.main">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Main function.</span>
+<span class="sd">    Input parameters:</span>
+<span class="sd">        sys.argv[0]: text -&gt; The current file name.</span>
+<span class="sd">        sys.argv[1]: text -&gt; The process input data file path.</span>
+<span class="sd">        sys.argv[2]: text -&gt; The start datetime.</span>
+<span class="sd">        sys.argv[3]: text -&gt; The end datetime.</span>
+<span class="sd">        sys.argv[4]: text -&gt; The archetype (building use).</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Validate the command line parameters</span>
+        <span class="n">validator</span><span class="o">.</span><span class="n">validateCommandLineParameters</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span>
+
+        <span class="c1"># Load the process payload</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  Loading the process payload...&#39;</span><span class="p">)</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">payloadFile</span><span class="p">:</span>
+            <span class="n">processPayload</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">payloadFile</span><span class="p">)</span>
+
+        <span class="c1"># Validate the process payload</span>
+        <span class="n">processPayload</span> <span class="o">=</span> <span class="n">validator</span><span class="o">.</span><span class="n">validateProcessPayload</span><span class="p">(</span><span class="n">processPayload</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  Input data validation OK!...&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Execute the process</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Main/&gt;  Loading the Model...&#39;</span><span class="p">)</span>
+        <span class="n">executeBuildingEnergySimulationProcess</span><span class="p">(</span>
+            <span class="n">processPayload</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">4</span><span class="p">])</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exception</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">exception</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">iDesignRES - Building Stock Energy Model</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../modules.html">Modules</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, Tecnalia.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.2</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

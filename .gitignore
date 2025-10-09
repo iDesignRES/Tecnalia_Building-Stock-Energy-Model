@@ -1,0 +1,16 @@
+**/.settings
+**/.vscode
+**/*.log
+**/*.db
+**/*.backup
+**/*.tiff
+**/*.tif
+**/*.gpkg
+**/*.shp
+**/*.zip
+**/*.xlsx
+**/*.lock
+**/*.coverage
+**/__pycache__/
+**/.pytest_cache/
+**/volumes/
