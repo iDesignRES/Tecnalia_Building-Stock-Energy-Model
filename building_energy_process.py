@@ -20,9 +20,9 @@ import sys
 import pandas as pd
 
 from datetime import datetime
-from modules import constants
-from modules import model
-from modules import validator
+from building_stock_energy_model import constants
+from building_stock_energy_model import model
+from building_stock_energy_model import validator
 from pathlib import Path
 
 

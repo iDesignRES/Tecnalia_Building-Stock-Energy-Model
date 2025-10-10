@@ -14,7 +14,7 @@
 #
 # Copyright (c) 2025 Tecnalia Research & Innovation
 
-from modules import validator
+from building_stock_energy_model import validator
 from pathlib import Path
 
 

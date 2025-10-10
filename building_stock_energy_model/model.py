@@ -20,7 +20,7 @@ import requests
 import warnings
 
 from calendar import isleap
-from modules import constants
+from building_stock_energy_model import constants
 from pathlib import Path
 from pandas.errors import PerformanceWarning
 
