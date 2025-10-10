@@ -290,10 +290,10 @@ def executeModelStep04(nutsId, hddReduction, cddReduction):
     filePath = Path(__file__).parent.parent / 'database' / '18-Schedule.csv'
     dfSchedule = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')
     filePath = Path(__file__).parent.parent / \
-        'database' / '15-RES_hh_tes (%).xlsx'
+        'database' / '15-RES_hh_tes.xlsx'
     dfResHHTes = pd.read_excel(filePath)
     filePath = Path(__file__).parent.parent / \
-        'database' / '19-SER_hh_tes (%).xlsx'
+        'database' / '19-SER_hh_tes.xlsx'
     dfSerHHTes = pd.read_excel(filePath)
     filePath = Path(__file__).parent.parent / 'database' / '22-UValues.csv'
     dfUvalues = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')

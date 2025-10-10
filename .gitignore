@@ -8,7 +8,6 @@
 **/*.gpkg
 **/*.shp
 **/*.zip
-**/*.xlsx
 **/*.lock
 **/*.coverage
 **/__pycache__/

@@ -14,7 +14,7 @@
 #
 # Copyright (c) 2025 Tecnalia Research & Innovation
 
-VERSION = 'v0.9.3'
+VERSION = 'v0.9.4'
 SCIENTIFIC_NOTATION = True
 WINTER_TEMPERATURE = 12
 SUMMER_TEMPERATURE = 22.5
