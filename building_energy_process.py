@@ -249,6 +249,10 @@ def main():
         processPayload = validator.validateProcessPayload(processPayload)
         print('Main/>  Input data validation OK!...')
 
+        # Validate the integrity of the database
+        print('Main/>  Validating the integrity of the database...')
+        validator.validateDatabaseIntegrity()
+
         # Execute the process
         print('Main/>  Loading the Model...')
         executeBuildingEnergySimulationProcess(

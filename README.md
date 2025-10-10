@@ -128,6 +128,8 @@ The following tests have been defined for the model:
 
 - Valid payload.
 
+- The integrity of the database.
+
 - Correct execution test.
 
 With a resulting code coverage of 93%:
@@ -135,10 +137,10 @@ With a resulting code coverage of 93%:
 | Name                  | Stmts    | Miss   | Cover   |
 | --------------------- | -------- | ------ | ------- |
 | modules/_ *init _*.py | 0        | 0      | 100%    |
-| modules/constants.py  | 6        | 0      | 100%    |
+| modules/constants.py  | 10       | 0      | 100%    |
 | modules/model.py      | 879      | 63     | 93%     |
-| modules/validator.py  | 520      | 29     | 94%     |
-| **TOTAL**             | **1405** | **92** | **93%** |
+| modules/validator.py  | 521      | 32     | 94%     |
+| **TOTAL**             | **1410** | **95** | **93%** |
 
 ## Full example
 
