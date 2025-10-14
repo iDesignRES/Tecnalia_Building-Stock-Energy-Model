@@ -15,7 +15,7 @@
 # Copyright (c) 2025 Tecnalia Research & Innovation
 
 import os
-from modules import constants
+from building_stock_energy_model import constants
 
 
 # Test -> Consolidated database
