@@ -7,7 +7,7 @@ license = "GPLv2"
 readme = "README.md"
 
 # Packages
-packages = [{ include = "modules" }]
+packages = [{ include = "building_stock_energy_model" }]
 
 # Includes
 include = ["database/*.csv", "database/*.xlsx", "temporary/*.csv"]

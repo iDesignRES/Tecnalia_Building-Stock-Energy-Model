@@ -18,7 +18,7 @@ import copy
 import json
 import re
 from pathlib import Path
-from modules import validator
+from building_stock_energy_model import validator
 
 
 TEST_INPUT_PATH = str(Path(__file__).parent / 'input_test.json')

@@ -17,7 +17,7 @@
 import math
 import os
 from datetime import datetime
-from modules import constants
+from building_stock_energy_model import constants
 
 
 #######################################################################
