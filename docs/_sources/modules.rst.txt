@@ -3,25 +3,21 @@ Modules
 
 Main Module
 -----------
-
 .. automodule:: building_energy_process
    :members:
    :undoc-members:
    :show-inheritance:
 
 Model Module
-------------------
-   
-.. automodule:: modules.model
+------------
+.. automodule:: building_stock_energy_model.model
    :members:
    :undoc-members:
    :show-inheritance:
-
+  
 Validator Module
-------------------
-
-.. automodule:: modules.validator
+----------------
+.. automodule:: building_stock_energy_model.validator
    :members:
    :undoc-members:
    :show-inheritance:
-

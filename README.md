@@ -1,5 +1,7 @@
 # iDesignRES: Building Stock Energy Model
 
+[![Docs](https://img.shields.io/badge/docs-stable-brightgreen)](https://idesignres.github.io/Tecnalia_Building-Stock-Energy-Model/)
+
 This README provides an overview of the Model iDesignRES Building Stock Energy Model within iDesignRES.
 
 It is handled by Tecnalia and part of WP1, Task number Task 1.4.
@@ -40,14 +42,22 @@ Output data:
 ## Implemented features
 
 - The model allows building stock simulations for any region in Europe avoiding most of the building data collection, treatment, and preprocessing.
+  
+  > It should be noted that in the current implementation stage, the model is only available for the use case in the Basque Country. The other use cases for the project will also be included when appropriate.
+
 - The model allows simulations of a given year on an hourly basis (based on the heating degree hours method) for both NUTS Level 2 and NUTS level 3 contained in the region.
+
 - The model generates in a first instance the most relevant information required as input to the energy model in an automated way for the selected NUTS Level 2 region of Europe. Avoiding the user having to contact the different local, provincial, and regional entities in question for the request of cadaster shape files. The characterization obtained is at the portal level of each building in the region collecting the main characteristics in terms of use, sub-use, age, geometry, area and height, as well as their geographical distribution that can be used for finer analysis than NUTS Level 2.
+
 - In a second simulation phase, the model treats the information obtained and simplifies it to the level of archetypes of representative building typologies (according to the form factor) to be simulated for the region.
+
 - The model offers a high degree of disaggregation for both the calculation and the presentation of results based on the following structure: Use - age - archetype - final use – fuel
+
 - The model has an internal database that provides the most relevant data to perform the simulations for any region in Europe. It also offers the possibility of substituting these values for others proposed by the modeler in case more specific information is available.
+
 - Through new simulations of future years, the model allows to evaluate the behavior of the building stock for different scenarios that consider different degrees of deployment of certain technologies.
+
 - Regarding the coordination with the rest of the models of higher scales that contemplate the behavior of the building sector, the developed model maintains a coherence with them using a structure of disaggregation of building typologies, final uses and fuels used, as well as allowing the use of the outputs of the simulation models at higher scales to adjust some of the parameters of the regional model.
-- It should be noted that in the current implementation stage, the model is only available for the use case in the Basque Country. The other use cases for the project will also be included when appropriate.
 
 ## Core assumption
 
@@ -136,17 +146,17 @@ The following tests have been defined for the model:
 
 - The integrity of the database.
 
-- Correct execution test.
+- Correct execution test, checking the correct output.
 
-With a resulting code coverage of 93%:
+With a resulting code coverage of 92%:
 
-| Name                  | Stmts    | Miss   | Cover   |
-| --------------------- | -------- | ------ | ------- |
-| modules/_ *init _*.py | 0        | 0      | 100%    |
-| modules/constants.py  | 10       | 0      | 100%    |
-| modules/model.py      | 879      | 63     | 93%     |
-| modules/validator.py  | 521      | 32     | 94%     |
-| **TOTAL**             | **1410** | **95** | **93%** |
+| Name                  | Stmts    | Miss    | Cover   |
+| --------------------- | -------- | ------- | ------- |
+| modules/_ *init _*.py | 0        | 0       | 100%    |
+| modules/constants.py  | 11       | 0       | 100%    |
+| modules/model.py      | 1038     | 89      | 91%     |
+| modules/validator.py  | 534      | 33      | 94%     |
+| **TOTAL**             | **1583** | **122** | **92%** |
 
 ## Full example
 
@@ -154,4 +164,4 @@ To review a complete example of the model, access [this directory](example/READM
 
 ## Documentation
 
-To review the complete model documentation, access [this directory](docs/README.md).
+To review the complete model documentation, access [here](https://idesignres.github.io/Tecnalia_Building-Stock-Energy-Model/).

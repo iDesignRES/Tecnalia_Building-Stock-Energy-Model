@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "building_energy_process"
-version = "0.9.5"
+version = "0.10.0"
 description = "Building Energy Simulation process client"
 authors = ["Alberto Molinuevo Martin <alberto.molinuevo@tecnalia.com>"]
 license = "GPLv2"
@@ -14,6 +14,7 @@ include = ["database/*.csv", "database/*.xlsx", "temporary/*.csv"]
 
 # Dependencies
 [tool.poetry.dependencies]
+furo = "^2025.9.25"
 python = "^3.10"
 pandas = "^2.2"
 numpy = "^2.2"
@@ -28,4 +29,5 @@ requests = "^2.31.0"
 autopep8 = "^2.3.2"
 sphinx = "8.1.2"
 sphinx-autobuild = "2024.10.3"
+sphinx-copybutton = "0.5.2"
 

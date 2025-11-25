@@ -15,6 +15,7 @@
 # Copyright (c) 2025 Tecnalia Research & Innovation
 
 import os
+
 from building_stock_energy_model import constants
 
 

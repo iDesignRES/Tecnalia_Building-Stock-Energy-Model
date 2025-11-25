@@ -59,7 +59,9 @@ The Building Stock Energy Model uses two main types of input data:
 
 1. **Parameters defined in the *input.json* file**.
 
-2. **Building data obtained from a prior geoprocessing step**, stored in a CSV file named according to the NUTS2 region code (*ES21.csv*).
+2. **Building data obtained from a prior geoprocessing step**, stored in two different CSV files named according to the NUTS2 region code (*ES21_preprocess.csv* and *ES21_solar.csv*), both for the Building Stock Energy Model itself and for the solar module for buildings included as part of the Building Stock Energy Model.
+   
+   ---
 
 The CSV file contains aggregated information on buildings, classified by archetypes and grouped into **seven construction periods**, resulting in a total of **98 archetypes**:
 
@@ -81,7 +83,62 @@ Each archetype includes aggregated geometric characteristics such as:
 
 - Total exterior façade area. [m2]
 
-This dataset represents the **building stock of the selected region**. Based on this representation, the model performs the **energy characterization of buildings**, estimating both the energy demand and the expected energy consumption.
+This dataset represents the **building stock of the selected region**.
+
+#### **<u>Solar building energy model</u>**
+
+It’s a **spatial inventory of usable solar potential**, broken down by **region** and **radiation intensity band**.
+
+The solar building energy model uses two main types of input data:
+
+1. **Parameters defined in the *input.json* file**.
+
+2. **Radiation data obtained from a prior geoprocessing step**, stored in a CSV file named according to the NUTS2 region code (*ES21_solar.csv*).
+
+Radiation data is obtained from a previous geoprocessing operation combining several
+layers, such as global incident solar radiation (GHI), soil and environmental protection, land use and slope, to identify the most suitable areas for installation, excluding those where it is not possible to do so.
+
+This process provides a CSV file that will be used as input for the solar generation model for large plants. In this case, the analysis is carried out at the NUTS3 region level to consider possible changes in terrain and radiation.
+
+The generated CSV provides, for each NUTS3 region, the **distribution of available area according to solar radiation levels**, starting from 700 **kWh/m²·year (value previously defined as a threshold)**.
+
+It provides the information about:
+
+- **Where** suitable surfaces are,
+
+- **How much area** they represent, and
+
+- **What level of solar radiation** they receive.
+
+Each **row** in the CSV corresponds to:
+
+- One **NUTS3 region**, and
+
+- One **radiation band** (e.g., 700–800, 800–900, …).
+
+| Column                                 | Description                                                                                                                                   | Units / Type        |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| Region                                 | NUTS3 code of the subregion                                                                                                                   | Text                |
+| Centroid_X, Centroid_Y                 | Longitude and latitude of the region centroid                                                                                                 | Degrees (EPSG:4326) |
+| Total_Area                             | Total geometric area of the region                                                                                                            | m²                  |
+| Max_Radiation                          | Maximum radiation value within the region                                                                                                     | kWh/m²·year         |
+| Average_Radiation                      | Mean radiation value within the region                                                                                                        | kWh/m²·year         |
+| Threshold                              | Lower limit of the radiation band (700, 800, 900, …)                                                                                          | Numeric             |
+| Area_m2                                | Area (m²) within that radiation band [Threshold, Threshold+100) that meets all filters (valid land use, non-protected, slope below threshold) | m²                  |
+| Median_Radiation                       | Median radiation value within that band                                                                                                       | kWh/m²·year         |
+| Median_Radiation_X, Median_Radiation_Y | Coordinates (lon/lat) of the pixel closest to the median radiation value                                                                      | Degrees (EPSG:4326) |
+
+#### <u>**How to interpret it**</u>
+
+Each row represents a **solar potential band** within a NUTS3 region.
+
+```
+Region = ES123, Threshold = 800, Area_m2 = 1,250,000, Median_Radiation = 84
+```
+
+In region **ES123**, there are **1.25 km²** of usable area with solar radiation between **800 and 900 kWh/m²·year**, and the median value of that band is **845 kWh/m²·year**.
+
+Based on this representation, the model performs the **energy characterization of buildings**, estimating both the energy demand and the expected energy consumption.
 
 The combination of the structured archetype approach and the detailed geometric parameters enables the model to provide a scalable and region-specific assessment of building energy performance.
 
@@ -1262,6 +1319,62 @@ Regarding the information contained in the *input.json* file, it defines the exe
                     "Post-2010": 0
                 }
             }
+        ],
+        "solar": [
+            {
+                "building_use": "Apartment Block",
+                "area_total": null,
+                "power": 195.826,
+                "capex": null
+            },
+            {
+                "building_use": "Single family- Terraced houses",
+                "area_total": null,
+                "power":83.188,
+                "capex": null
+            },
+            {
+                "building_use": "Offices",
+                "area_total": null,
+                "power": 14.624,
+                "capex": null
+            },
+            {
+                "building_use": "Education",
+                "area_total": null,
+                "power": 27.346,
+                "capex": null
+            },
+            {
+                "building_use": "Health",
+                "area_total": null,
+                "power": 2.807,
+                "capex": null
+            },
+            {
+                "building_use": "Trade",
+                "area_total": null,
+                "power": 25.995,
+                "capex": null
+            },
+            {
+                "building_use": "Hotels and Restaurants",
+                "area_total": null,
+                "power": 6.689,
+                "capex": null
+            },
+            {
+                "building_use": "Other non-residential buildings",
+                "area_total": null,
+                "power": 74.930,
+                "capex": null
+            },
+            {
+                "building_use": "Sport",
+                "area_total": null,
+                "power": 4.820,
+                "capex": null
+            }
         ]
     }
 }
@@ -1309,6 +1422,10 @@ The file can be edited to apply a custom configuration of the scenario to be exe
 - 2000-2010: decimal number as percentage, between 0 and 1 -> % of buildings from the construction period that are renovated.
 - Post-2010: decimal number as percentage, between 0 and 1 -> % of buildings from the construction period that are renovated.
 
+- solar/area_total: decimal number -> Total solar PV installed area for each building use in m2. In case of more than one parameter is provided, area is firstly considered and power capacity secondly, and finally the investment in €. 
+- solar/power: decimal number -> Total solar PV installed capacity for each building use in MW. In case of more than one parameter is provided, area is firstly considered and power capacity secondly, and finally the investment in €.
+- solar/capex: decimal number -> Total investment in PV installations for each building use in €. Investment is only considered is no other entry is provided.
+
 Clarifications:
 1) As mentioned before, the fields "building_use" can only have the values:
    - Apartment Block
@@ -1351,10 +1468,10 @@ This model has *<building_use>* as an additional parameter, and it can take one 
 > - Other non-residential buildings.
 > - Sport.
 
-For this example, *Apartment Block* will be used, so the final execution command will be as follows:
+For this example, *Offices* will be used, so the final execution command will be as follows:
 
 ```
-poetry run python building_energy_process.py input.json 2019-03-01T13:00:00 2019-03-02T13:00:00 "Apartment Block"
+poetry run python building_energy_process.py input.json 2019-03-01T13:00:00 2019-03-02T13:00:00 "Offices"
 ```
 
 This command automatically runs the simulation, taking the necessary input data from the *[usecases](../usecases)* folder and the *[input.json](../input.json)* file.
@@ -1363,387 +1480,383 @@ When execution is launched, a full input validation is performed. And when the e
 
 ```
 {
-    'Datetime': [
-        Timestamp('2019-03-0113: 00: 00'),
-        Timestamp('2019-03-0114: 00: 00'),
-        Timestamp('2019-03-0115: 00: 00'),
-        Timestamp('2019-03-0116: 00: 00'),
-        Timestamp('2019-03-0117: 00: 00'),
-        Timestamp('2019-03-0118: 00: 00'),
-        Timestamp('2019-03-0119: 00: 00'),
-        Timestamp('2019-03-0120: 00: 00'),
-        Timestamp('2019-03-0121: 00: 00'),
-        Timestamp('2019-03-0122: 00: 00'),
-        Timestamp('2019-03-0123: 00: 00'),
-        Timestamp('2019-03-0200: 00: 00'),
-        Timestamp('2019-03-0201: 00: 00'),
-        Timestamp('2019-03-0202: 00: 00'),
-        Timestamp('2019-03-0203: 00: 00'),
-        Timestamp('2019-03-0204: 00: 00'),
-        Timestamp('2019-03-0205: 00: 00'),
-        Timestamp('2019-03-0206: 00: 00'),
-        Timestamp('2019-03-0207: 00: 00'),
-        Timestamp('2019-03-0208: 00: 00'),
-        Timestamp('2019-03-0209: 00: 00'),
-        Timestamp('2019-03-0210: 00: 00'),
-        Timestamp('2019-03-0211: 00: 00'),
-        Timestamp('2019-03-0212: 00: 00'),
-        Timestamp('2019-03-0213: 00: 00')
-    ],
-    'Solids|Coal': [
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00
-    ],
-    'Liquids|Gas': [
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00
-    ],
-    'Liquids|Oil': [
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00
-    ],
-    'Gases|Gas': [
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00
-    ],
-    'Solids|Biomass': [
-        3.20e+04,
-        3.20e+04,
-        6.41e+04,
-        6.41e+04,
-        6.41e+04,
-        6.41e+04,
-        1.48e+05,
-        1.95e+05,
-        1.78e+05,
-        1.52e+05,
-        1.94e+05,
-        3.20e+04,
-        2.13e+04,
-        2.14e+04,
-        1.77e+04,
-        2.16e+04,
-        1.90e+04,
-        1.88e+05,
-        1.48e+05,
-        7.19e+04,
-        3.20e+04,
-        3.20e+04,
-        3.20e+04,
-        3.20e+04,
-        3.20e+04
-    ],
-    'Electricity': [
-        1.61e+05,
-        1.60e+05,
-        1.65e+05,
-        1.66e+05,
-        2.11e+05,
-        2.81e+05,
-        3.09e+05,
-        3.14e+05,
-        2.96e+05,
-        2.80e+05,
-        2.47e+05,
-        7.43e+04,
-        6.04e+04,
-        5.48e+04,
-        6.10e+04,
-        1.14e+05,
-        1.83e+05,
-        2.93e+05,
-        2.84e+05,
-        2.06e+05,
-        2.00e+05,
-        2.07e+05,
-        1.54e+05,
-        1.71e+05,
-        1.61e+05
-    ],
-    'Heat': [
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00
-    ],
-    'Liquids|Biomass': [
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00
-    ],
-    'Gases|Biomass': [
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00
-    ],
-    'Hydrogen': [
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00,
-        0.00e+00
-    ],
-    'Heat|Solar': [
-        6.13e+03,
-        6.13e+03,
-        1.23e+04,
-        1.23e+04,
-        1.23e+04,
-        1.23e+04,
-        1.23e+04,
-        1.23e+04,
-        1.23e+04,
-        1.23e+04,
-        2.45e+04,
-        6.13e+03,
-        2.45e+03,
-        2.45e+03,
-        2.45e+03,
-        2.45e+03,
-        2.45e+03,
-        2.45e+04,
-        1.23e+04,
-        6.13e+03,
-        6.13e+03,
-        6.13e+03,
-        6.13e+03,
-        6.13e+03,
-        6.13e+03
-    ],
-    'Variablecost[
-        €/KWh
-    ]': [
-        3.88e+04,
-        3.86e+04,
-        4.17e+04,
-        4.19e+04,
-        5.22e+04,
-        6.83e+04,
-        7.95e+04,
-        8.34e+04,
-        7.82e+04,
-        7.30e+04,
-        6.78e+04,
-        1.89e+04,
-        1.51e+04,
-        1.38e+04,
-        1.50e+04,
-        2.74e+04,
-        4.31e+04,
-        7.82e+04,
-        7.39e+04,
-        5.15e+04,
-        4.79e+04,
-        4.95e+04,
-        3.74e+04,
-        4.11e+04,
-        3.88e+04
-    ],
-    'Emissions[
-        KgCO2/KWh
-    ]': [
-        6.47e+04,
-        6.44e+04,
-        6.72e+04,
-        6.75e+04,
-        8.53e+04,
-        1.13e+05,
-        1.26e+05,
-        1.29e+05,
-        1.21e+05,
-        1.14e+05,
-        1.02e+05,
-        3.02e+04,
-        2.45e+04,
-        2.23e+04,
-        2.46e+04,
-        4.58e+04,
-        7.33e+04,
-        1.20e+05,
-        1.16e+05,
-        8.36e+04,
-        8.05e+04,
-        8.32e+04,
-        6.22e+04,
-        6.87e+04,
-        6.47e+04
-    ]
+	'Datetime': [
+		Timestamp('2019-03-01 13:00:00'),
+		Timestamp('2019-03-01 14:00:00'),
+		Timestamp('2019-03-01 15:00:00'),
+		Timestamp('2019-03-01 16:00:00'),
+		Timestamp('2019-03-01 17:00:00'),
+		Timestamp('2019-03-01 18:00:00'),
+		Timestamp('2019-03-01 19:00:00'),
+		Timestamp('2019-03-01 20:00:00'),
+		Timestamp('2019-03-01 21:00:00'),
+		Timestamp('2019-03-01 22:00:00'),
+		Timestamp('2019-03-01 23:00:00'),
+		Timestamp('2019-03-02 00:00:00'),
+		Timestamp('2019-03-02 01:00:00'),
+		Timestamp('2019-03-02 02:00:00'),
+		Timestamp('2019-03-02 03:00:00'),
+		Timestamp('2019-03-02 04:00:00'),
+		Timestamp('2019-03-02 05:00:00'),
+		Timestamp('2019-03-02 06:00:00'),
+		Timestamp('2019-03-02 07:00:00'),
+		Timestamp('2019-03-02 08:00:00'),
+		Timestamp('2019-03-02 09:00:00'),
+		Timestamp('2019-03-02 10:00:00'),
+		Timestamp('2019-03-02 11:00:00'),
+		Timestamp('2019-03-02 12:00:00'),
+		Timestamp('2019-03-02 13:00:00')
+	],
+	'Solids|Coal': [
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0
+	],
+	'Liquids|Gas': [
+		421.6582560014501,
+		421.6582560014501,
+		297.64112188337657,
+		148.82056094168829,
+		124.0171341180736,
+		297.64112188337657,
+		396.85482917783554,
+		496.0685364722944,
+		372.05140235422084,
+		198.42741458891777,
+		148.82056094168829,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		99.21370729445889,
+		223.23084141253244,
+		148.82056094168829,
+		99.21370729445889,
+		49.60685364722944,
+		49.60685364722944,
+		421.6582560014501,
+		421.6582560014501
+	],
+	'Liquids|Oil': [
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0
+	],
+	'Gases|Gas': [
+		3929.402792033129,
+		3929.402792033129,
+		2773.696088493973,
+		1386.8480442469865,
+		1155.7067035391558,
+		2773.696088493973,
+		3698.2614513252984,
+		4622.826814156623,
+		3467.1201106174663,
+		1849.1307256626492,
+		1386.8480442469865,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		924.5653628313246,
+		2080.2720663704804,
+		1386.8480442469865,
+		924.5653628313246,
+		462.2826814156623,
+		462.2826814156623,
+		3929.402792033129,
+		3929.402792033129
+	],
+	'Solids|Biomass': [
+		1014.9826997252494,
+		1353.3102663003326,
+		1353.3102663003326,
+		1353.3102663003326,
+		676.6551331501663,
+		338.32756657508315,
+		1341.1462142312248,
+		2438.465080404527,
+		4560.23517463671,
+		5268.439986463098,
+		5798.69772427841,
+		21657.96988542318,
+		21608.68932215396,
+		20974.487530670245,
+		19795.36941067087,
+		16240.084021005008,
+		17092.873522832993,
+		19991.538838772405,
+		18945.878626324105,
+		13730.316815800637,
+		3352.0320064932534,
+		0.0,
+		0.0,
+		0.0,
+		0.0
+	],
+	'Electricity': [
+		11766.812586220707,
+		11951.451935257264,
+		12984.926649536337,
+		42833.00436210933,
+		46898.22068042445,
+		42741.84236856242,
+		38662.37483189151,
+		32634.977296707108,
+		17298.16591147814,
+		13484.327324351656,
+		12588.358421902947,
+		17113.280922477526,
+		17130.495990961655,
+		16910.383719169375,
+		16866.858842394093,
+		22942.203897491894,
+		23923.370016859197,
+		24590.839793845687,
+		23222.076129081455,
+		19657.084162495867,
+		11872.35457839193,
+		9991.578890149578,
+		9510.073389672754,
+		11389.07388194305,
+		11424.30468785889
+	],
+	'Heat': [
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0
+	],
+	'Liquids|Biomass': [
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0
+	],
+	'Gases|Biomass': [
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0
+	],
+	'Hydrogen': [
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0
+	],
+	'Heat|Solar': [
+		194.00132289721446,
+		258.6684305296193,
+		258.6684305296193,
+		258.6684305296193,
+		129.33421526480964,
+		64.66710763240482,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0
+	],
+	'Variable cost [€/KWh]': [
+		3049.4505727095757,
+		3111.20083767508,
+		3265.0095610754906,
+		10029.401468936645,
+		10909.050099753684,
+		10051.236255478423,
+		9237.228664765273,
+		7980.583686849499,
+		4490.17136386212,
+		3535.9149234388005,
+		3326.5121270286886,
+		5170.558895638952,
+		5171.709369283956,
+		5084.9340446571605,
+		5007.713590158883,
+		6202.391685620422,
+		6476.668894679096,
+		6862.520146199298,
+		6571.988681854722,
+		5404.427223985074,
+		2988.8260796360933,
+		2331.6299565097274,
+		2220.885838379767,
+		2904.715937430086,
+		2912.8191630054207
+	],
+	'Emissions [KgCO2/KWh]': [
+		5810.5650228741415,
+		5890.323492440402,
+		5979.934763862494,
+		17502.028091623288,
+		19047.31418508439,
+		17834.657260513617,
+		16483.191202126018,
+		14356.20207826485,
+		7952.2677558968135,
+		5991.46002834522,
+		5514.417699005718,
+		7218.042546006151,
+		7224.024308192473,
+		7124.783879500645,
+		7086.193327507318,
+		9446.260867477355,
+		9853.096360137815,
+		10429.78352992862,
+		10187.563751095457,
+		8477.618628249236,
+		5055.6131518511,
+		4115.756469266323,
+		3923.6394991191305,
+		5641.576343250109,
+		5655.633678052537
+	]
 }
 ```

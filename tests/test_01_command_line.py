@@ -40,16 +40,22 @@ def test_missingCommandLineParameters():
 
     # The first parameter does not exist
     try:
-        parameters = ['', TEST_INPUT_PATH, '2019-03-01T13:00:00',
-                      '2019-03-02T13:00:00', 'Apartment Block']
+        parameters = ['',
+                      TEST_INPUT_PATH,
+                      '2019-03-01T13:00:00',
+                      '2019-03-02T13:00:00',
+                      'Apartment Block']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
 
     # The second parameter does not exist
     try:
-        parameters = ['building_energy_process.py', '',
-                      '2019-03-01T13:00:00', '2019-03-02T13:00:00', 'Sport']
+        parameters = ['building_energy_process.py',
+                      '',
+                      '2019-03-01T13:00:00',
+                      '2019-03-02T13:00:00',
+                      'Sport']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
@@ -57,7 +63,10 @@ def test_missingCommandLineParameters():
     # The third parameter does not exist
     try:
         parameters = ['building_energy_process.py',
-                      TEST_INPUT_PATH, '', '2019-03-02T13:00:00', 'Trade']
+                      TEST_INPUT_PATH,
+                      '',
+                      '2019-03-02T13:00:00',
+                      'Trade']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
@@ -65,55 +74,76 @@ def test_missingCommandLineParameters():
     # The fourth parameter does not exist
     try:
         parameters = ['building_energy_process.py',
-                      TEST_INPUT_PATH, '2019-03-01T13:00:00', '', 'Education']
+                      TEST_INPUT_PATH,
+                      '2019-03-01T13:00:00',
+                      '',
+                      'Education']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
 
     # The fifth parameter does not exist
     try:
-        parameters = ['building_energy_process.py', TEST_INPUT_PATH,
-                      '2019-03-01T13:00:00', '2019-03-02T13:00:00', '']
+        parameters = ['building_energy_process.py',
+                      TEST_INPUT_PATH,
+                      '2019-03-01T13:00:00',
+                      '2019-03-02T13:00:00',
+                      '']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
 
     # The payload file, corresponding to the second parameter, does not exist
     try:
-        parameters = ['building_energy_process.py', 'wrong_input.json',
-                      '2019-03-01T13:00:00', '2019-03-02T13:00:00', 'Sport']
+        parameters = ['building_energy_process.py',
+                      'wrong_input.json',
+                      '2019-03-01T13:00:00',
+                      '2019-03-02T13:00:00',
+                      'Sport']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
 
     # The "start time" parameter has an invalid format
     try:
-        parameters = ['building_energy_process.py', TEST_INPUT_PATH,
-                      '2019-03-01 13:00:00', '2019-03-02T13:00:00', 'Sport']
+        parameters = ['building_energy_process.py',
+                      TEST_INPUT_PATH,
+                      '2019-03-01 13:00:00',
+                      '2019-03-02T13:00:00',
+                      'Sport']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
 
     # The "end time" parameter has an invalid format
     try:
-        parameters = ['building_energy_process.py', TEST_INPUT_PATH,
-                      '2019-03-01T13:00:00', '2019-03-02 13:00:00', 'Sport']
+        parameters = ['building_energy_process.py',
+                      TEST_INPUT_PATH,
+                      '2019-03-01T13:00:00',
+                      '2019-03-02 13:00:00',
+                      'Sport']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
 
     # The "end time" parameter is less than the "start time" parameter
     try:
-        parameters = ['building_energy_process.py', TEST_INPUT_PATH,
-                      '2019-04-01T13:00:00', '2019-03-02T13:00:00', 'Sport']
+        parameters = ['building_energy_process.py',
+                      TEST_INPUT_PATH,
+                      '2019-04-01T13:00:00',
+                      '2019-03-02T13:00:00',
+                      'Sport']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
 
     # The "building use" parameter has an invalid value
     try:
-        parameters = ['building_energy_process.py', TEST_INPUT_PATH,
-                      '2019-03-01T13:00:00', '2019-03-02T13:00:00', 'Test']
+        parameters = ['building_energy_process.py',
+                      TEST_INPUT_PATH,
+                      '2019-03-01T13:00:00',
+                      '2019-03-02T13:00:00',
+                      'Test']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
@@ -131,8 +161,11 @@ def test_commandLineParametersOK():
 
     exceptionsRaised = 0
     try:
-        parameters = ['building_energy_process.py', TEST_INPUT_PATH,
-                      '2019-03-01T13:00:00', '2019-03-02T13:00:00', 'Apartment Block']
+        parameters = ['building_energy_process.py',
+                      TEST_INPUT_PATH,
+                      '2019-03-01T13:00:00',
+                      '2019-03-02T13:00:00',
+                      'Apartment Block']
         validator.validateCommandLineParameters(parameters)
     except Exception as e:
         exceptionsRaised += 1
