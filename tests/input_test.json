@@ -1172,6 +1172,62 @@
 					"Post-2010": 0
 				}
 			}
+		],
+		"solar": [
+			{
+				"building_use": "Apartment Block",
+				"area_total": null,
+				"power": 195.826,
+				"capex": null
+			},
+			{
+				"building_use": "Single family- Terraced houses",
+				"area_total": null,
+				"power":83.188,
+				"capex": null
+			},
+			{
+				"building_use": "Offices",
+				"area_total": null,
+				"power": 14.624,
+				"capex": null
+			},
+			{
+				"building_use": "Education",
+				"area_total": null,
+				"power": 27.346,
+				"capex": null
+			},
+			{
+				"building_use": "Health",
+				"area_total": null,
+				"power": 2.807,
+				"capex": null
+			},
+			{
+				"building_use": "Trade",
+				"area_total": null,
+				"power": 25.995,
+				"capex": null
+			},
+			{
+				"building_use": "Hotels and Restaurants",
+				"area_total": null,
+				"power": 6.689,
+				"capex": null
+			},
+			{
+				"building_use": "Other non-residential buildings",
+				"area_total": null,
+				"power": 74.930,
+				"capex": null
+			},
+			{
+				"building_use": "Sport",
+				"area_total": null,
+				"power": 4.820,
+				"capex": null
+			}
 		]
 	}
 }

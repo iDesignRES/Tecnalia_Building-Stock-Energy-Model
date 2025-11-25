@@ -15,14 +15,17 @@
 # Copyright (c) 2025 Tecnalia Research & Innovation
 
 import io
+import json
 import pandas as pd
+import pvlib
 import requests
 import warnings
 
-from calendar import isleap
 from building_stock_energy_model import constants
+from calendar import isleap
 from pathlib import Path
 from pandas.errors import PerformanceWarning
+from pyproj import Transformer
 
 import openpyxl as op
 from openpyxl.styles import Alignment, Color, Font, PatternFill
@@ -32,37 +35,66 @@ warnings.simplefilter(action='ignore', category=PerformanceWarning)
 
 
 # Function: Build. Energy Sim. -> Model -> Step 01 : Load the previous result
-def executeModelStep01(nutsId):
-    '''
-    Build. Energy Sim. -> Model -> Step 01 : Load the previous result.
-    Input parameters:
-        nutsId: str -> Identifier of NUTS2 region for which the analysis will be carried out.
-    '''
+def s01LoadPreviousResult(nutsId: str) -> tuple:
+    """Model Step 01: Load the previous result.
 
+    Args:
+        nutsId (str): Identifier of NUTS2 region for which the
+            analysis will be carried out.
+    
+    Returns:
+        tuple
+
+    """
+
+    #  Create the temporary directory
+    print('Model: Step 01/>  Creating the temporary directory...')
+    temporaryDirectory = Path(__file__).parent.parent / 'temporary'
+    temporaryDirectory.mkdir(parents=True,
+                             exist_ok=True)
+
+    #  Load the result file of the Buildings preprocess
     print('Model: Step 01/>  Loading the result file of the Buildings preprocess...')
     csvPath = Path(__file__).parent.parent / \
-        'usecases' / f'{nutsId.upper()}.csv'
-    df = pd.read_csv(csvPath, sep=',', decimal='.')
+        'usecases' / f'{nutsId.upper()}_preprocess.csv'
+    dfPreprocess = pd.read_csv(csvPath,
+                               sep=',',
+                               decimal='.')
+
+    #  Load the solar data
+    print('Model: Step 01/>  Loading the solar data...')
+    csvPath = Path(__file__).parent.parent / \
+        'usecases' / f'{nutsId.upper()}_solar.csv'
+    dfSolar = pd.read_csv(csvPath, sep=';',
+                          decimal=',',
+                          thousands='.')
 
     # Finish
     print('Model: Step 01/>  [OK]')
-    return df
+    return dfPreprocess, dfSolar
 
 
 # Function: Build. Energy Sim. -> Model -> Step 02 -> Retrieve temperatures
-def executeModelStep02(nutsId, year):
-    '''
-    Build. Energy Sim. -> Model -> Step 02 : Retrieve temperatures.
-    Input parameters:
-        nutsId: text -> Identifier of NUTS2 region for which the analysis will be carried out.
-        year: integer -> The selected year.
-    '''
+def s02RetrieveTemperatures(nutsId: str,
+                            year: int) -> pd.DataFrame:
+    """Model Step 02: Retrieve temperatures.
+
+    Args:
+        nutsId (str): Identifier of NUTS2 region for which the
+            analysis will be carried out.
+        year (int): The selected year.
+    
+    Returns:
+        DataFrame
+
+    """
 
     # Load the CSV from the database
     print('Model: Step 02/>  Retrieving temperatures...')
     csvPath = Path(__file__).parent.parent / 'database' / \
         '07-DemandNinja_Temperature_DB.csv'
-    df = pd.read_csv(csvPath, sep=';')
+    df = pd.read_csv(csvPath,
+                     sep=';')
 
     # Filter for the row that contains the country code
     row = df[df['CNTR_CODE'] == nutsId[:2]]
@@ -70,18 +102,23 @@ def executeModelStep02(nutsId, year):
         raise ValueError('Model: Step 02/>  ' + nutsId[:2] + ' not mapped!')
 
     print('Model: Step 02/>  Connecting and downloading...')
-    response = requests.get(row['PopWgt'].values[0], timeout=60)
+    response = requests.get(row['PopWgt'].values[0],
+                            timeout=60)
     if response.status_code != 200:
         raise ValueError(
             'Model: Step 02/>  The temepratures data could not be downloaded!')
 
     print('Model: Step 02/>  Loading and filtering the downloaded data...')
     downloadedData = pd.read_csv(io.StringIO(
-        response.text), comment='#', parse_dates=['time'], sep=',', engine='python')
+        response.text),
+        comment='#',
+        parse_dates=['time'],
+        sep=',',
+        engine='python')
 
     # Normalize to UTC native
-    downloadedData['time'] = pd.to_datetime(
-        downloadedData['time'], utc=True).dt.tz_convert(None)
+    downloadedData['time'] = pd.to_datetime(downloadedData['time'],
+                                            utc=True).dt.tz_convert(None)
 
     # Choose region column
     regionCode = nutsId[:4]
@@ -105,20 +142,23 @@ def executeModelStep02(nutsId, year):
 
     # Remove 29-Feb from the source if it exists.
     src = src.set_index('time')
-    src = dropFeb29IfPresentForTemperaturesData(src)
+    src = x03DropFeb29IfPresentForTemperaturesData(src)
 
     # Ensure numeric data type and clean up NaN values.
-    src[selectedRegion] = pd.to_numeric(src[selectedRegion], errors='coerce')
+    src[selectedRegion] = pd.to_numeric(src[selectedRegion],
+                                        errors='coerce')
     src = src.dropna(subset=[selectedRegion])
 
     # If the destination year is the same as the origin year, there is no remapping
     # If it is different, the dates are relabeled.
     if year != srcYear:
         # Remap
-        new_index = remapYear(src.index, year)
+        new_index = x05RemapYear(src.index,
+                                 year)
         src.index = new_index
         if isleap(year):
-            src = addFeb29IfMissingForTemperaturesData(src, year)
+            src = x01AddFeb29IfMissingForTemperaturesData(src,
+                                                          year)
     else:
         # If the target year is not a leap year, ensure that February 29th
         # does not exist (it was already removed above)
@@ -135,8 +175,10 @@ def executeModelStep02(nutsId, year):
     dailyMax = df.groupby([df.index.month, df.index.day])[
         'HourlyTemperature'].max()
     dailyAvgTemp = (dailyMin + dailyMax) / 2
-    dailyAvgTemp.index = pd.date_range(
-        start=f'{year}-01-01', end=f'{year + 1}-01-01', freq='D', inclusive='left')
+    dailyAvgTemp.index = pd.date_range(start=f'{year}-01-01',
+                                       end=f'{year + 1}-01-01',
+                                       freq='D',
+                                       inclusive='left')
     dailyAvgTemp = dailyAvgTemp.resample('h').ffill()
 
     # Mensual: (min+max)/2 por mes -> rellenado a horario
@@ -144,10 +186,12 @@ def executeModelStep02(nutsId, year):
     monthlyMax = df.resample('ME').max()['HourlyTemperature']
     monthlyAvgTemp = (monthlyMin + monthlyMax) / 2
 
-    allDaysInYear = pd.date_range(
-        start=f'{year}-01-01', end=f'{year + 1}-01-01', freq='D', inclusive='left')
-    monthlyAvgTemp = monthlyAvgTemp.reindex(
-        allDaysInYear, method='ffill').resample('h').ffill().bfill()
+    allDaysInYear = pd.date_range(start=f'{year}-01-01',
+                                  end=f'{year + 1}-01-01',
+                                  freq='D',
+                                  inclusive='left')
+    monthlyAvgTemp = monthlyAvgTemp.reindex(allDaysInYear,
+                                            method='ffill').resample('h').ffill().bfill()
 
     # Add columns
     df.loc[:, 'DailyAvgTemp'] = dailyAvgTemp
@@ -170,12 +214,14 @@ def executeModelStep02(nutsId, year):
     df['Season'] = df['MonthlyAvgTemp'].apply(season)
 
     # Save to the temporary directory
-    print('Model: Step 02/>  Saving as CSV to the temporary directory...')
+    print('Model: Step 02/>  Saving as CSV to a temporary directory...')
     csvPath = Path(__file__).parent.parent / \
         'temporary' / f'{nutsId[:4]}_Temperatures.csv'
     dfOut = df.copy()
     dfOut.index = dfOut.index.strftime('%m/%d/%Y %H:%M')
-    dfOut.to_csv(csvPath, sep=';', decimal=',')
+    dfOut.to_csv(csvPath,
+                 sep=';',
+                 decimal=',')
 
     # Finish
     print('Model: Step 02/>  [OK]')
@@ -183,19 +229,26 @@ def executeModelStep02(nutsId, year):
 
 
 # Function: Build. Energy Sim. -> Model -> Step 03 -> Retrieve radiation values
-def executeModelStep03(nutsId, year):
-    '''
-    Build. Energy Sim. -> Model -> Step 03 : Retrieve radiation values.
-    Input parameters:
-        nutsId: text -> Identifier of NUTS2 region for which the analysis will be carried out.
-        year: integer -> The selected year.
-    '''
+def s03RetrieveRadiationValues(nutsId: str,
+                               year: int) -> pd.DataFrame:
+    """Model Step 03: Retrieve radiation values.
+
+    Args:
+        nutsId (str): Identifier of NUTS2 region for which the
+            analysis will be carried out.
+        year (int): The selected year.
+    
+    Returns:
+        DataFrame
+
+    """
 
     # Load the CSV from the database
     print('Model: Step 03/>  Retrieving the radiation values...')
     csvPath = Path(__file__).parent.parent / 'database' / \
         '06-DemandNinja_Radiation_DB.csv'
-    df = pd.read_csv(csvPath, sep=';')
+    df = pd.read_csv(csvPath,
+                     sep=';')
 
     # Filter for the row that contains the country code
     row = df[df['CNTR_CODE'] == nutsId[:2]]
@@ -210,9 +263,13 @@ def executeModelStep03(nutsId, year):
 
     # Normalize the time column
     downloadedData = pd.read_csv(io.StringIO(
-        response.text), comment='#', parse_dates=['time'], sep=',', engine='python')
-    downloadedData['time'] = pd.to_datetime(
-        downloadedData['time'], utc=True).dt.tz_convert(None)
+        response.text),
+        comment='#',
+        parse_dates=['time'],
+        sep=',',
+        engine='python')
+    downloadedData['time'] = pd.to_datetime( downloadedData['time'],
+                                            utc=True).dt.tz_convert(None)
 
     # Region column selection
     regionCode = nutsId[:4]
@@ -234,27 +291,32 @@ def executeModelStep03(nutsId, year):
     src = src.set_index('time')
 
     # Clean
-    src[selectedRegion] = pd.to_numeric(src[selectedRegion], errors='coerce')
+    src[selectedRegion] = pd.to_numeric(src[selectedRegion],
+                                        errors='coerce')
     src = src.dropna(subset=[selectedRegion])
-    src = dropFeb29IfPresentForRadiationData(src)
+    src = x04DropFeb29IfPresentForRadiationData(src)
 
     # Remap if the year is different than the source year
     if year != srcYear:
-        src.index = remapYear(src.index, year)
+        src.index = x05RemapYear(src.index,
+                                 year)
         if isleap(year):
-            src = addFeb29IfMissingForRadiationData(src, year)
+            src = x02AddFeb29IfMissingForRadiationData(src,
+                                                       year)
 
-    # Renombra la columna al nutscode original
+    # Rename the column to the original nuts code
     src = src.rename(columns={selectedRegion: nutsId})
 
-    # Formato de fecha para exportar
+    # Date format to export
     src.index = src.index.strftime('%m/%d/%Y %H:%M')
 
     # Save to the temporary directory
     print('Model: Step 03/>  Saving as CSV to the temporary directory...')
     csvPath = Path(__file__).parent.parent / \
         'temporary' / f'{selectedRegion}_Radiation.csv'
-    src.to_csv(csvPath, sep=';', decimal=',')
+    src.to_csv(csvPath,
+               sep=';',
+               decimal=',')
 
     # Finish
     print('Model: Step 03/>  [OK]')
@@ -262,33 +324,52 @@ def executeModelStep03(nutsId, year):
 
 
 # Function: Build. Energy Sim. -> Model -> Step 04 -> Load the database
-def executeModelStep04(nutsId, hddReduction, cddReduction):
-    '''
-    Build. Energy Sim. -> Model -> Step 04 : Load the database.
-    Input parameters:
-        nutsId: str -> Identifier of NUTS2 region for which the
-                       analysis will be carried out.
-        hddReduction: float -> Reduction in heating degree days
-                               for future scenario.
-        cddReduction: float -> Reduction in cooling degree days
-                               for future scenarios.
-    '''
+def s04LoadDatabase(nutsId: str,
+                    hddReduction: float,
+                    cddReduction: float)-> tuple:
+    """Model Step 04: Load the database.
+
+    Args:
+        nutsId (str): Identifier of NUTS2 region for which the
+            analysis will be carried out.
+        hddReduction (float): Reduction in heating degree days
+            for future scenario.
+        cddReduction (float): Reduction in cooling degree days
+            for future scenarios.
+    
+    Returns:
+        tuple
+
+    """
 
     print('Model: Step 04/>  Loading the database...')
     filePath = Path(__file__).parent.parent / \
         'database' / '08-DHW&InternalGains.csv'
-    dfDHW = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')
+    dfDHW = pd.read_csv(filePath,
+                        sep=';',
+                        decimal=',',
+                        thousands='.')
     filePath = Path(__file__).parent.parent / 'database' / '23-YearPeriods.csv'
-    dfYears = pd.read_csv(filePath, sep=';')
+    dfYears = pd.read_csv(filePath,
+                          sep=';')
     filePath = Path(__file__).parent.parent / 'database' / '24-Sectors.csv'
-    dfSectors = pd.read_csv(filePath, sep=';')
+    dfSectors = pd.read_csv(filePath,
+                            sep=';')
     filePath = Path(__file__).parent.parent / 'database' / '26-Season.csv'
-    dfSeasons = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')
+    dfSeasons = pd.read_csv(filePath, sep=';',
+                            decimal=',',
+                            thousands='.')
     filePath = Path(__file__).parent.parent / 'temporary' / \
         f'{nutsId[:4]}_Temperatures.csv'
-    dfTemperatures = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')
+    dfTemperatures = pd.read_csv(filePath,
+                                 sep=';',
+                                 decimal=',',
+                                 thousands='.')
     filePath = Path(__file__).parent.parent / 'database' / '18-Schedule.csv'
-    dfSchedule = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')
+    dfSchedule = pd.read_csv(filePath,
+                             sep=';',
+                             decimal=',',
+                             thousands='.')
     filePath = Path(__file__).parent.parent / \
         'database' / '15-RES_hh_tes.xlsx'
     dfResHHTes = pd.read_excel(filePath)
@@ -296,49 +377,89 @@ def executeModelStep04(nutsId, hddReduction, cddReduction):
         'database' / '19-SER_hh_tes.xlsx'
     dfSerHHTes = pd.read_excel(filePath)
     filePath = Path(__file__).parent.parent / 'database' / '22-UValues.csv'
-    dfUvalues = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')
+    dfUvalues = pd.read_csv(filePath,
+                            sep=';',
+                            decimal=',',
+                            thousands='.')
     filePath = Path(__file__).parent.parent / 'database' / \
         '17-RetrofittingUValues.csv'
-    dfRetroUvalues = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')
+    dfRetroUvalues = pd.read_csv(filePath,
+                                 sep=';',
+                                 decimal=',',
+                                 thousands='.')
     filePath = Path(__file__).parent.parent / 'database' / '01-ACH.csv'
-    dfACH = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')
+    dfACH = pd.read_csv(filePath,
+                        sep=';',
+                        decimal=',',
+                        thousands='.')
     filePath = Path(__file__).parent.parent / \
         'database' / '02-BaseTemperatures.csv'
-    dfBaseTemperatures = pd.read_csv(
-        filePath, sep=';', decimal=',', thousands='.')
+    dfBaseTemperatures = pd.read_csv(filePath,
+                                     sep=';',
+                                     decimal=',',
+                                     thousands='.')
     filePath = Path(__file__).parent.parent / 'database' / '27-Calendar.csv'
-    dfCalendar = pd.read_csv(filePath, sep=';', decimal=',', thousands='.')
+    dfCalendar = pd.read_csv(filePath,
+                             sep=';',
+                             decimal=',',
+                             thousands='.')
     filePath = Path(__file__).parent.parent / 'database' / '04-BES_CAPEX.csv'
-    dfBesCapex = pd.read_csv(
-        filePath, sep=';', decimal=',', thousands='.', encoding='ISO-8859-1')
+    dfBesCapex = pd.read_csv(filePath,
+                             sep=';',
+                             decimal=',',
+                             thousands='.',
+                             encoding='ISO-8859-1')
     filePath = Path(__file__).parent.parent / 'database' / '05-BES_OPEX.csv'
-    dfBesOpex = pd.read_csv(filePath, sep=';', decimal=',',
-                            thousands='.', encoding='ISO-8859-1')
+    dfBesOpex = pd.read_csv(filePath,
+                            sep=';',
+                            decimal=',',
+                            thousands='.',
+                            encoding='ISO-8859-1')
     filePath = Path(__file__).parent.parent / 'database' / '14-RES.csv'
-    dfRes = pd.read_csv(filePath, sep=';', decimal=',',
-                        thousands='.', encoding='ISO-8859-1')
+    dfRes = pd.read_csv(filePath,
+                        sep=';',
+                        decimal=',',
+                        thousands='.',
+                        encoding='ISO-8859-1')
     filePath = Path(__file__).parent.parent / \
         'database' / '03-BES_Capacity.csv'
-    dfBesCapacity = pd.read_csv(
-        filePath, sep=';', decimal=',', thousands='.', encoding='ISO-8859-1')
+    dfBesCapacity = pd.read_csv(filePath,
+                                sep=';',
+                                decimal=',',
+                                thousands='.',
+                                encoding='ISO-8859-1')
     filePath = Path(__file__).parent.parent / \
         'database' / '16-RetrofittingCost.csv'
-    dfRetroCost = pd.read_csv(
-        filePath, sep=';', decimal=',', thousands='.', encoding='ISO-8859-1')
+    dfRetroCost = pd.read_csv(filePath,
+                              sep=';',
+                              decimal=',',
+                              thousands='.',
+                              encoding='ISO-8859-1')
     filePath = Path(__file__).parent.parent / 'database' / \
         '21-SolarGainsOffice(Wm2).csv'
-    dfSolarOffice = pd.read_csv(
-        filePath, sep=';', decimal=',', thousands='.', encoding='ISO-8859-1')
+    dfSolarOffice = pd.read_csv(filePath, sep=';',
+                                decimal=',',
+                                thousands='.',
+                                encoding='ISO-8859-1')
     filePath = Path(__file__).parent.parent / 'database' / \
         '20-SolarGainsNONOffice(Wm2).csv'
-    dfSolarNoffice = pd.read_csv(
-        filePath, sep=';', decimal=',', thousands='.', encoding='ISO-8859-1')
+    dfSolarNoffice = pd.read_csv(filePath,
+                                 sep=';',
+                                 decimal=',',
+                                 thousands='.',
+                                 encoding='ISO-8859-1')
     filePath = Path(__file__).parent.parent / 'database' / \
         '09-DwellingSizeAndShare.csv'
-    dfDwellings = pd.read_csv(
-        filePath, sep=';', decimal=',', thousands='.', encoding='ISO-8859-1')
+    dfDwellings = pd.read_csv(filePath,
+                              sep=';',
+                              decimal=',',
+                              thousands='.',
+                              encoding='ISO-8859-1')
     filePath = Path(__file__).parent.parent / 'database' / '13-R_T_hh_eff.xlsx'
     dfRTHHEff = pd.read_excel(filePath)
+    filePath = Path(__file__).parent.parent / 'database' / '28-Solar_parameter_buildings.json'
+    with open(filePath, 'r', encoding='utf-8') as jsonFile:
+        dictBuildings = json.load(jsonFile)
 
     # Build the HDH dataframe
     dfHDH = dfCalendar[['Datetime']].copy()
@@ -369,32 +490,240 @@ def executeModelStep04(nutsId, hddReduction, cddReduction):
     dfHDHExtended = pd.DataFrame()
     ln = len(dfSchedule.groupby('Use'))
     for i in range(ln):
-        dfHDHExtended = pd.concat([dfHDHExtended, dfHDH], ignore_index=True)
+        dfHDHExtended = pd.concat([dfHDHExtended, dfHDH],
+                                  ignore_index=True)
     dfSchedule[['HDH', 'CDH']] = dfHDHExtended[['HDH', 'CDH']]
 
     # Add to the Temperatures dataframe the Heating and Cooling factors
-    dfTemperatures = dfTemperatures.merge(
-        dfSeasons[['Season', 'Heating']], on='Season', how='left')
-    dfTemperatures = dfTemperatures.merge(
-        dfSeasons[['Season', 'Cooling']], on='Season', how='left')
+    dfTemperatures = dfTemperatures.merge(dfSeasons[['Season', 'Heating']],
+                                          on='Season',
+                                          how='left')
+    dfTemperatures = dfTemperatures.merge(dfSeasons[['Season', 'Cooling']],
+                                          on='Season',
+                                          how='left')
 
     # Finish
     print('Model: Step 04/>  [OK]')
     return dfDHW, dfYears, dfSectors, dfSeasons, dfTemperatures, dfSchedule, dfResHHTes, \
         dfSerHHTes, dfUvalues, dfRetroUvalues, dfACH, dfBaseTemperatures, dfCalendar, \
         dfBesCapex, dfBesOpex, dfRes, dfBesCapacity, dfRetroCost, dfSolarOffice, \
-        dfSolarNoffice, dfDwellings, dfRTHHEff
+        dfSolarNoffice, dfDwellings, dfRTHHEff, dictBuildings
 
 
-# Function: Build. Energy Sim. -> Model -> Step 05 -> Add columns to the input dataframe
-def executeModelStep05(dfCSV):
-    '''
-    Build. Energy Sim. -> Model -> Step 05 : Add columns to the input dataframe.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 05 -> Retrieve solar data
+def s05RetrieveSolarData(nutsId: str,
+                         year: int,
+                         listInputJsonSolar: list,
+                         dictDBBuildings: dict):
+    """Model Step 05: Retrieve radiation values.
 
-    print('Model: Step 05/>  Adding new columns to the input dataframe...')
+    Args:
+        nutsId (str): Identifier of NUTS2 region for which the
+            analysis will be carried out.
+        year (int): The selected year.
+        listInputJsonSolar(list): Data from the input.json file. Example::
+
+            [
+                {'building_use': 'Apartment Block', 'area_total': None, 'power': 195.826, 'capex': None},
+                {'building_use': 'Single family- Terraced houses', ...},
+                {'building_use': 'Offices', ...},
+                {'building_use': 'Education', ...},
+                {'building_use': 'Health', ...},
+                {'building_use': 'Trade', ...},
+                {'building_use': 'Hotels and Restaurants', ...},
+                {'building_use': 'Other non-residential buildings', ...},
+                {'building_use': 'Sport', ...}
+            ]
+        
+        dictDBBuildings (dict): Data from the database file. Example::
+
+            {
+                'System': {'system_cost': 0.5, 'opex_pv': 15000, 'min_ghi_pv': 1000, 'land_use_pv': 100},
+                'Apartment Block': {'tilt': 30, 'azimuth': 180, 'loss': 14, 'efficiency': 18,
+                    'tracking_porcentage': 0, 'use_factor': 100, 'distribution': [0.6, 0.2, 0.2]},
+                'Single family- Terraced houses': {...},
+                'Hotels and Restaurants': {...},
+                'Health': {...},
+                'Education': {...},
+                'Offices': {...},
+                'Sport': {.},
+                'Trade': {.},
+                'Other non-residential buildings': {...},
+            }
+    
+    Returns:
+        DataFrame
+
+    """
+
+
+    # Load the necessary information
+    print('Model: Step 05/>  Loading the solar data...')
+    filePath = Path(__file__).parent.parent / 'usecases' / \
+        (nutsId + '_solar.csv')
+    dfSolar = pd.read_csv(filePath,
+                          sep=',',
+                          decimal='.',
+                          encoding='ISO-8859-1')
+    
+    # Obtain the "System" configuration, and read the properties
+    dictSystem = dictDBBuildings['System']
+    systemCost = x06EstablishValue(dictSystem,
+                                   'system_cost',
+                                   0.2,
+                                   1,
+                                   0.5)
+    opexPV = x06EstablishValue(dictSystem,
+                               'opex_pv',
+                               0,
+                               3.0e+04,
+                               1.5e+03)
+    minGHIPV = x06EstablishValue(dictSystem,
+                                 'min_ghi_pv',
+                                 500,
+                                 2.0e+03,
+                                 1.0e+03)
+    landUsePV = x06EstablishValue(dictSystem,
+                                  'land_use_pv',
+                                  50,
+                                  200,
+                                  100)
+
+    # Create dataframes for later, and the output dictionary
+    prodAgreggated = pd.DataFrame()
+    nuts2Distrib = pd.DataFrame()
+    output = []
+    
+    # Separate by archetypes
+    for archetype in constants.BUILDING_USES:
+        dfSolarArch = dfSolar[dfSolar['Building_Use'] == archetype]
+        for element in listInputJsonSolar:
+            if element['building_use'] == archetype:
+                # Merge with de information loaded from the database
+                dictArchetype = element
+                dictArchetype.update(dictDBBuildings[archetype])
+                break
+        
+        dictScada = dfSolarArch.sort_values(by='Median_Radiation',
+                                            ascending=False)
+        
+        areaAvailable = x06EstablishValue(dictArchetype,
+                                          'area_total',
+                                          0,
+                                          10**10,
+                                          0) if 'area_total' in dictArchetype else None
+        power = x06EstablishValue(dictArchetype,
+                                  'power',
+                                  0,
+                                  10**10,
+                                  0) if 'power' in dictArchetype else None
+        capex = x06EstablishValue(dictArchetype,
+                                  'capex',
+                                  0,
+                                  10**10,
+                                  0) if 'capex' in dictArchetype else None
+        if areaAvailable is None and power is None and capex is None:
+            areaAvailable = 0
+            power = None
+            capex = None
+        
+        loss = x06EstablishValue(dictArchetype,
+                                 'loss',
+                                 0,
+                                 20,
+                                 14)
+        tracking = x06EstablishValue(dictArchetype,
+                                     'tracking_porcentage',
+                                     0,
+                                     2,
+                                     0)
+        tilt = x06EstablishValue(dictArchetype,
+                                 'tilt',
+                                 0,
+                                 90,
+                                 30)
+        azimuth = x06EstablishValue(dictArchetype,
+                                    'azimuth',
+                                    0,
+                                    180,
+                                    180)
+        if 'distribution' in dictArchetype:
+            distributionResidential = dictArchetype['distribution']
+            if distributionResidential:
+                distribAzimuth = [180, 90, 270]
+                porcent = distributionResidential
+                if len(porcent) != len(distribAzimuth) or sum(porcent) != 1:
+                    porcent = [0.6, 0.2, 0.2]
+            else:
+                distribAzimuth = [azimuth]
+                porcent = [1]
+        else:
+            distribAzimuth = [180, 90, 270]
+            porcent = [0.6, 0.2, 0.2]
+
+        # Obtain the available area
+        listParameters = [areaAvailable, power, capex]
+        print('Model: Step 05/>  Obtaining the available area for "' + archetype + '"...')
+        areaAvailable, power, capex = x07GetAvailableArea(parameters=listParameters,
+                                                          cost=systemCost,
+                                                          landUse=landUsePV)
+        if areaAvailable > 0:
+            # Obtain the regions
+            rows, name_nuts2 = x08GetRegions(dictScada=dictScada,
+                                             area=areaAvailable,
+                                             minGhi=minGHIPV)
+
+            # Obtain the PV production
+            print('Model: Step 05/>  Obtaining the PV production for "' + archetype + '"...')
+            productionTracking = x09GetPVProduction(rows=rows,
+                                                    landUse=landUsePV,
+                                                    tilt=tilt,
+                                                    distribAzimuth=distribAzimuth,
+                                                    tracking=1,
+                                                    loss=loss,
+                                                    porcent=porcent,
+                                                    year=year)
+            productionFixed = x09GetPVProduction(rows=rows,
+                                                 landUse=landUsePV,
+                                                 tilt=tilt,
+                                                 distribAzimuth=distribAzimuth,
+                                                 tracking=0,
+                                                 loss=loss,
+                                                 porcent=porcent,
+                                                 year=year)
+            production = list(
+                map(sum, zip(map(lambda x: x * tracking, productionTracking),
+                             map(lambda x: x * (1 - tracking), productionFixed))))
+            prodAgreggated[archetype] = pd.DataFrame(production).sum(axis=0)
+            nuts2, potDistrib, areasDistrib = x10GetDistribution(rows=rows,
+                                                                 label='production')
+
+    # Save results in temporary directory
+    prodAgreggated.index=pd.to_datetime(prodAgreggated.index).round('h').strftime('%d/%m/%Y %H:%M')
+    csvPath = Path(__file__).parent.parent / \
+        'temporary' / f'{nutsId.upper()}_solar_results.csv'
+    prodAgreggated.to_csv(csvPath,
+                          sep=';',
+                          decimal=',')
+
+    # Finish
+    print('Model: Step 05/>  [OK]')
+    return prodAgreggated
+
+
+# Function: Build. Energy Sim. -> Model -> Step 06 -> Add columns to the main DataFrame
+def s06AddColumnsToMainDataFrame(dfCSV: pd.DataFrame) -> pd.DataFrame:
+    """Model Step 06: Add columns to the main dataframe.
+
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 06/>  Adding new columns to the input dataframe...')
     dfCSV = pd.concat([dfCSV,
                        pd.DataFrame(columns=['Opaque fachade area',
                                              'Window Area', 'Period', 'Net heated floor area', 'Heated Volume', 'Wall to floor ratio', 'Sector',
@@ -533,29 +862,40 @@ def executeModelStep05(dfCSV):
                       axis=1)
 
     # Finish
-    print('Model: Step 05/>  [OK]')
+    print('Model: Step 06/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 06 -> Add the input data
-def executeModelStep06(dfCSV, dfDHW, dfYears, dfSectors, dfDwellings, nutsId, increaseResidentialBuiltArea, increaseServiceBuiltArea):
-    '''
-    Build. Energy Sim. -> Model -> Step 06 : Add the input data.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dfDHW: DataFrame -> The DataFrame corresponding to DHW.
-        dfYears: DataFrame -> The DataFrame corresponding to Years.
-        dfSectors: DataFrame -> The DataFrame corresponding to Sectors.
-        dfDwellings: DataFrame -> The DataFrame corresponding to Dwellings.
-        nutsId: text -> Identifier of NUTS2 region for which the analysis
-                        will be carried out.
-        increaseResidentialBuiltArea: float -> Reduction in heating degree
-                                               days for future scenario.
-        increaseServiceBuiltArea: float -> Reduction in cooling degree days
-                                           for future scenarios.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 07 -> Add the input data to the main DataFrame
+def s07AddInputDataToMainDataframe(dfCSV: pd.DataFrame,
+                                   dfDHW: pd.DataFrame,
+                                   dfYears: pd.DataFrame,
+                                   dfSectors: pd.DataFrame,
+                                   dfDwellings: pd.DataFrame,
+                                   nutsId: str,
+                                   increaseResidentialBuiltArea: float,
+                                   increaseServiceBuiltArea: float) -> pd.DataFrame:
+    """Model Step 07: Add the input data to the main DataFrame.
 
-    print('Model: Step 06/>  Updating the dataframe information...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfDHW: (DataFrame): The DataFrame corresponding to DHW.
+        dfYears (DataFrame): The DataFrame corresponding to Years.
+        dfSectors (DataFrame): The DataFrame corresponding to Sectors.
+        dfDwellings (DataFrame): The DataFrame corresponding to Dwellings.
+        nutsId (str): Identifier of NUTS2 region for which the analysis
+            will be carried out.
+        increaseResidentialBuiltArea (float): Reduction in heating degree
+            days for future scenario.
+        increaseServiceBuiltArea (float): Reduction in cooling degree days
+            for future scenarios.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 07/>  Updating the dataframe information...')
     for index, row in dfCSV.iterrows():
         value = float(dfDHW[dfDHW['BuildingUse'] == row['Use']]['WWR'].iloc[0])
         dfCSV.at[index, 'Window Area'] = float(
@@ -642,26 +982,55 @@ def executeModelStep06(dfCSV, dfDHW, dfYears, dfSectors, dfDwellings, nutsId, in
                                           == nutsId[:2].upper()].values[0][4]
 
     # Finish
-    print('Model: Step 06/>  [OK]')
+    print('Model: Step 07/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 07 -> Add the active measures
-def executeModelStep07(dfCSV, dfReshhtes, dfSerhhtes, dfRThheff, nutsId, activeMeasures, activeMeasuresBaseline, archetypes):
-    '''
-    Build. Energy Sim. -> Model -> Step 07 : Add the active measures.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dfReshhtes: DataFrame -> The DataFrame corresponding to Residential.
-        dfSerhhtes: DataFrame -> The DataFrame corresponding to Service.
-        dfRThheff: DataFrame -> The DataFrame corresponding to RT.
-        nutsId: str -> Identifier of NUTS2 region for which the analysis
-                        will be carried out.
-        activeMeasures: list -> The list of active measures.
-        activeMeasuresBaseline: list -> The list of active measures
-                                        corresponding to the baseline.
-        archetypes: list -> The list of building uses.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 08 -> Add the active measures
+def s08AddActiveMeasures(dfCSV: pd.DataFrame,
+                         dfReshhtes: pd.DataFrame,
+                         dfSerhhtes: pd.DataFrame,
+                         dfRThheff: pd.DataFrame,
+                         nutsId: str,
+                         activeMeasures: list,
+                         activeMeasuresBaseline: list,
+                         archetypes: list) -> pd.DataFrame:
+    """Model Step 08: Add the active measures.
+
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfReshhtes (DataFrame): The DataFrame corresponding to Residential.
+        dfSerhhtes (DataFrame): The DataFrame corresponding to Service.
+        dfRThheff (DataFrame): The DataFrame corresponding to RT.
+        nutsId: str -> Identifier of NUTS2 region for which the
+            analysis will be carried out.
+        activeMeasures (list): The list of active measures::
+            
+            Example: see "input.json" file in the root directory.
+        
+        activeMeasuresBaseline (list): The list of active measures corresponding to the baseline::
+
+            Example: see "input.json" file in the root directory.
+        
+        archetypes (list): The list of building uses. Example::
+
+            "[
+                "Apartment Block",
+                "Single family- Terraced houses",
+                "Hotels and Restaurants",
+                "Health",
+                "Education",
+                "Offices",
+                "Trade",
+                "Other non-residential buildings",
+                "Sport"
+            ]"
+    
+    Returns:
+        DataFrame
+
+    """
+            
 
     dfReshhtes = dfReshhtes[['Energy service_Fuel',
                              'Energy service', nutsId[:2].upper()]]
@@ -670,7 +1039,7 @@ def executeModelStep07(dfCSV, dfReshhtes, dfSerhhtes, dfRThheff, nutsId, activeM
     dfRThheff = dfRThheff[['Energy service_Fuel',
                            'Energy service', nutsId[:2].upper()]]
 
-    print('Model: Step 07/>  Writing the Active measures...')
+    print('Model: Step 08/>  Writing the Active measures...')
     for measure in activeMeasures:
         if measure['user_defined_data']:
             # Space heating
@@ -1312,7 +1681,7 @@ def executeModelStep07(dfCSV, dfReshhtes, dfSerhhtes, dfRThheff, nutsId, activeM
                           else row['L. Electricity']), axis=1)
             )
 
-    print('Model: Step 07/>  Writing the Active measures (baseline)...')
+    print('Model: Step 08/>  Writing the Active measures (baseline)...')
     for measure in activeMeasuresBaseline:
         if measure['user_defined_data']:
             # Space heating
@@ -2088,20 +2457,27 @@ def executeModelStep07(dfCSV, dfReshhtes, dfSerhhtes, dfRThheff, nutsId, activeM
                       == 'Appliances_Electricity'].values[0][2]
 
     # Finish
-    print('Model: Step 07/>  [OK]')
+    print('Model: Step 08/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 08 -> Add the passive measures
-def executeModelStep08(dfCSV, passiveMeasures):
-    '''
-    Build. Energy Sim. -> Model -> Step 08 : Add the passive measures.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        passiveMeasures: list -> The list of passive measures.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 09 -> Add the passive measures
+def s09AddPassiveMeasures(dfCSV: pd.DataFrame,
+                          passiveMeasures: pd.DataFrame) -> pd.DataFrame:
+    """Model Step 09: Add the passive measures.
 
-    print('Model: Step 08/>  Writing the Passive measures...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        passiveMeasures (list): The list of passive measures::
+
+            Example: see "input.json" file in the root directory.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 09/>  Writing the Passive measures...')
     for measure in passiveMeasures:
         dfCSV.loc[dfCSV['Use'] == measure['building_use'],
                   'Ref Level'] = measure['ref_level']
@@ -2121,24 +2497,34 @@ def executeModelStep08(dfCSV, passiveMeasures):
             measure['percentages_by_periods']['Post-2010']
 
     # Finish
-    print('Model: Step 08/>  [OK]')
+    print('Model: Step 09/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 09 -> Write the U-Values and the Internal Gains
-def executeModelStep09(dfCSV, dfDHW, dfUValues, dfRUValues, dfACH, nutsId):
-    '''
-    Build. Energy Sim. -> Model -> Step 09 : Write the U-Values and the Internal Gains.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dfDHW: DataFrame -> The DataFrame corresponding to DHW.
-        dfUValues: DataFrame -> The DataFrame corresponding to U-Values.
-        dfRUValues: DataFrame -> The DataFrame corresponding to Retroffitting U-Values.
-        dfACH: DataFrame -> The DataFrame corresponding to ACH.
-        nutsId: str -> Identifier of NUTS2 region for which the analysis will be carried out.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 10 -> Write the U-Values and the Internal Gains
+def s10WriteUValuesAndInternalGains(dfCSV: pd.DataFrame,
+                                    dfDHW: pd.DataFrame,
+                                    dfUValues: pd.DataFrame,
+                                    dfRUValues: pd.DataFrame,
+                                    dfACH: pd.DataFrame,
+                                    nutsId: str) -> pd.DataFrame:
+    """Model Step 10: Write the U-Values and the Internal Gains.
 
-    print('Model: Step 09/>  Writing the U-Values and the Internal Gains...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfDHW (DataFrame): The DataFrame corresponding to DHW.
+        dfUValues (DataFrame): The DataFrame corresponding to U-Values.
+        dfRUValues (DataFrame): The DataFrame corresponding to Retroffitting U-Values.
+        dfACH (DataFrame): The DataFrame corresponding to ACH.
+        nutsId (str) :Identifier of NUTS2 region for which the
+            analysis will be carried out.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 10/>  Writing the U-Values and the Internal Gains...')
     country = nutsId[:2].upper()
     for index, row in dfCSV.iterrows():
         # U-Values
@@ -2186,20 +2572,25 @@ def executeModelStep09(dfCSV, dfDHW, dfUValues, dfRUValues, dfACH, nutsId):
         dfCSV['Air renovation losses'] * dfCSV['Heated Volume']
 
     # Finish
-    print('Model: Step 09/>  [OK]')
+    print('Model: Step 10/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 10 -> Add the CAPEX dataframe
-def executeModelStep10(dfCSV, dfBesCapex):
-    '''
-    Build. Energy Sim. -> Model -> Step 10 : Add the CAPEX dataframe.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dfBesCapex: DataFrame -> The DataFrame corresponding to Capex.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 11 -> Add the CAPEX dataframe
+def s11AddCapexDataFrame(dfCSV: pd.DataFrame,
+                         dfBesCapex: pd.DataFrame) -> pd.DataFrame:
+    """Model Step 11: Add the CAPEX dataframe.
 
-    print('Model: Step 10/>  Adding the CAPEX dataframe...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfBesCapex (DataFrame): The DataFrame corresponding to Capex.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 11/>  Adding the CAPEX dataframe...')
 
     # Space heating
     dfCSV = dfCSV.assign(
@@ -2430,20 +2821,25 @@ def executeModelStep10(dfCSV, dfBesCapex):
     )
 
     # Finish
-    print('Model: Step 10/>  [OK]')
+    print('Model: Step 11/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 11 -> Add the OPEX dataframe
-def executeModelStep11(dfCSV, dfBesOpex):
-    '''
-    Build. Energy Sim. -> Model -> Step 11 : Add the OPEX dataframe.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dfBesOpex: DataFrame -> The DataFrame corresponding to Opex.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 12 -> Add the OPEX dataframe
+def s12AddOpexDataFrame(dfCSV: pd.DataFrame,
+                        dfBesOpex: pd.DataFrame) -> pd.DataFrame:
+    """Model Step 12: Add the OPEX dataframe.
 
-    print('Model: Step 11/>  Adding the OPEX dataframe...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfBesOpex (DataFrame): The DataFrame corresponding to Opex.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 12/>  Adding the OPEX dataframe...')
 
     # Fixed cost
     dfCSV = dfCSV.assign(
@@ -2530,20 +2926,25 @@ def executeModelStep11(dfCSV, dfBesOpex):
     )
 
     # Finish
-    print('Model: Step 11/>  [OK]')
+    print('Model: Step 12/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 12 -> Add the Retrofitting Cost dataframe
-def executeModelStep12(dfCSV, dfRetroCost):
-    '''
-    Build. Energy Sim. -> Model -> Step 12 : Add the Retrofitting Cost dataframe.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dfRetroCost: DataFrame -> The DataFrame corresponding to Retrofitting Cost.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 13 -> Add the Retrofitting Cost dataframe
+def s13AddRetrofittingCostDataFrame(dfCSV: pd.DataFrame,
+                                    dfRetroCost: pd.DataFrame) -> pd.DataFrame:
+    """Model Step 13: Add the Retrofitting Cost dataframe.
 
-    print('Model: Step 12/>  Adding the Retrofitting Cost dataframe...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfRetroCost (DataFrame): The DataFrame corresponding to Retrofitting Cost.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 13/>  Adding the Retrofitting Cost dataframe...')
     dfCSV = dfCSV.assign(
         **{
             'RFC Cost Low Wall': dfRetroCost.loc[dfRetroCost['Level'] == 'Low', 'Wall'].iloc[0],
@@ -2559,20 +2960,25 @@ def executeModelStep12(dfCSV, dfRetroCost):
     )
 
     # Finish
-    print('Model: Step 12/>  [OK]')
+    print('Model: Step 13/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 13 -> Add the Renewable Energy Systems dataframe
-def executeModelStep13(dfCSV, dfRes):
-    '''
-    Build. Energy Sim. -> Model -> Step 13 : Add the Renewable Energy Systems dataframe.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dfRes: DataFrame -> The DataFrame corresponding to Renewable Energy Systems.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 14 -> Add the Renewable Energy Systems dataframe
+def s14AddRenewableEnergySystemsDataFrame(dfCSV: pd.DataFrame,
+                                          dfRes: pd.DataFrame) -> pd.DataFrame:
+    """Model Step 14: Add the Renewable Energy Systems dataframe.
 
-    print('Model: Step 13/>  Adding the Renewable Energy Systems (RES) dataframe...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfRes (DataFrame): The DataFrame corresponding to Renewable Energy Systems.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 14/>  Adding the Renewable Energy Systems (RES) dataframe...')
     dfCSV = dfCSV.assign(
         **{
             'RES ST. Cost': dfRes.loc[dfRes['RES'] == 'Solar Thermal', 'Cost (E/m2)'].iloc[0],
@@ -2595,21 +3001,39 @@ def executeModelStep13(dfCSV, dfRes):
     )
 
     # Finish
-    print('Model: Step 13/>  [OK]')
+    print('Model: Step 14/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 14 -> Add the Capacity dataframe
-def executeModelStep14(dfCSV, dfCapacity, archetypes):
-    '''
-    Build. Energy Sim. -> Model -> Step 14 : Add the Capacity dataframe.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dfCapacity: DataFrame -> The DataFrame corresponding to Capacity.
-        archetypes: list -> The list of building uses.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 15 -> Add the Capacity dataframe
+def s15AddCapacityDataFrame(dfCSV: pd.DataFrame,
+                            dfCapacity: pd.DataFrame,
+                            archetypes: list) -> pd.DataFrame:
+    """Model Step 15: Add the Capacity dataframe.
 
-    print('Model: Step 14/>  Adding the Capacity dataframe...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfCapacity (DataFrame): The DataFrame corresponding to Capacity.
+        archetypes (list): The list of building uses. Example::
+
+            "[
+                "Apartment Block",
+                "Single family- Terraced houses",
+                "Hotels and Restaurants",
+                "Health",
+                "Education",
+                "Offices",
+                "Trade",
+                "Other non-residential buildings",
+                "Sport"
+            ]"
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 15/>  Adding the Capacity dataframe...')
     for arch in archetypes:
         dfCSV.loc[dfCSV['Use'] == arch, 'Central HP (SH)'] = dfCapacity.loc[(dfCapacity['Energy Service'] == 'Space heating')
                                                                             & (dfCapacity['Capacity KW/m2'] == 'Central HP'), arch].iloc[0]
@@ -2631,19 +3055,23 @@ def executeModelStep14(dfCSV, dfCapacity, archetypes):
                                                                                    & (dfCapacity['Capacity KW/m2'] == 'Individual HP 8KW'), arch].iloc[0]
 
     # Finish
-    print('Model: Step 14/>  [OK]')
+    print('Model: Step 15/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 15 -> Add the Equivalent Power dataframe
-def executeModelStep15(dfCSV):
-    '''
-    Build. Energy Sim. -> Model -> Step 15 : Add the Equivalent Power dataframe.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 16 -> Add the Equivalent Power dataframe
+def s16AddEquivalentPowerDataFrame(dfCSV: pd.DataFrame) -> pd.DataFrame:
+    """Model Step 16: Add the Equivalent Power dataframe.
 
-    print('Model: Step 15/>  Adding the Equivalent Power dataframe...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 16/>  Adding the Equivalent Power dataframe...')
 
     centralHPColumns = ['EP. Gas heat pumps', 'EP. Advanced electric heating']
     centralBoilerColumns = ['EP. LPG', 'EP. Diesel oil', 'EP. Natural gas',
@@ -2666,8 +3094,7 @@ def executeModelStep15(dfCSV):
                 1 - row['Share Individual']) + row['Central Boiler (WH)'] * row['Share Individual']
 
         # Space heating
-        dfCSV.at[index, 'EP. Solids (SH)'] = round(
-            centralBoiler[0] / 1000000, 6)
+        dfCSV.at[index, 'EP. Solids (SH)'] = round(centralBoiler[0] / 1.0e+06, 6)
         for col in centralHPColumns:
             dfCSV.at[index, col + ' (SH)'] = round(centralHP[0], 6)
         for col in centralBoilerColumns:
@@ -2688,19 +3115,23 @@ def executeModelStep15(dfCSV):
             dfCSV.at[index, col + ' (WH)'] = round(centralHP[2], 6)
 
     # Finish
-    print('Model: Step 15/>  [OK]')
+    print('Model: Step 16/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 16 -> Calculate the costs
-def executeModelStep16(dfCSV):
-    '''
-    Build. Energy Sim. -> Model -> Step 16 : Calculate the costs.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 17 -> Calculate the costs
+def s17CalculateCosts(dfCSV: pd.DataFrame) -> pd.DataFrame:
+    """Model Step 17: Calculate the costs.
 
-    print('Model: Step 16/>  Calculating the costs...')
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+    
+    Returns:
+        DataFrame
+
+    """
+
+    print('Model: Step 17/>  Calculating the costs...')
     dfDwellings = dfCSV[['Sector', 'Occ. Dwellings']]
     dfDwellings.loc[dfDwellings['Sector'] !=
                     'Residential', 'Occ. Dwellings'] = 1
@@ -2708,234 +3139,247 @@ def executeModelStep16(dfCSV):
         # Space heating
         val = row['CAPEX SH. Solids'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Solids (SH)'] * (
-                row['SH. Solids'] - row['SH. Solids base']) / 1000000
+                row['SH. Solids'] - row['SH. Solids base']) /  1.0e+06
         dfCSV.at[index, 'SH. Cost Solids'] = 0 if val < 0 else val
         val = row['CAPEX SH. LPG'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * \
             row['EP. LPG (SH)'] * (row['SH. LPG'] -
-                                   row['SH. LPG base']) / 1000000
+                                   row['SH. LPG base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost LPG'] = 0 if val < 0 else val
         val = row['CAPEX SH. Diesel oil'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Diesel oil (SH)'] * (
-                row['SH. Diesel oil'] - row['SH. Diesel oil base']) / 1000000
+                row['SH. Diesel oil'] - row['SH. Diesel oil base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Diesel oil'] = 0 if val < 0 else val
         val = row['CAPEX SH. Gas heat pumps'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Gas heat pumps (SH)'] * (
-                row['SH. Gas heat pumps'] - row['SH. Gas heat pumps base']) / 1000000
+                row['SH. Gas heat pumps'] - row['SH. Gas heat pumps base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Gas heat pumps'] = 0 if val < 0 else val
         val = row['CAPEX SH. Natural gas'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Natural gas (SH)'] * (
-                row['SH. Natural gas'] - row['SH. Natural gas base']) / 1000000
+                row['SH. Natural gas'] - row['SH. Natural gas base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Natural gas'] = 0 if val < 0 else val
         val = row['CAPEX SH. Biomass'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Biomass (SH)'] * (
-                row['SH. Biomass'] - row['SH. Biomass base']) / 1000000
+                row['SH. Biomass'] - row['SH. Biomass base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Biomass'] = 0 if val < 0 else val
         val = row['CAPEX SH. Geothermal'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Geothermal (SH)'] * (
-                row['SH. Geothermal'] - row['SH. Geothermal base']) / 1000000
+                row['SH. Geothermal'] - row['SH. Geothermal base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Geothermal'] = 0 if val < 0 else val
         val = row['CAPEX SH. Distributed heat'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Distributed heat (SH)'] * (
-                row['SH. Distributed heat'] - row['SH. Distributed heat base']) / 1000000
+                row['SH. Distributed heat'] - row['SH. Distributed heat base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Distributed heat'] = 0 if val < 0 else val
         val = row['CAPEX SH. Advanced electric heating'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Advanced electric heating (SH)'] *\
             (row['SH. Advanced electric heating'] -
-             row['SH. Advanced electric heating base']) / 1000000
+             row['SH. Advanced electric heating base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Advanced electric heating'] = 0 if val < 0 else val
         val = row['CAPEX SH. Conventional electric heating'] * row['Net heated floor area'] *\
             dfDwellings.at[index, 'Occ. Dwellings'] * row['Space heating'] * row['EP. Conventional electric heating (SH)'] *\
             (row['SH. Conventional electric heating'] -
-             row['SH. Conventional electric heating base']) / 1000000
+             row['SH. Conventional electric heating base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Conventional electric heating'] = 0 if val < 0 else val
         val = row['CAPEX SH. BioOil'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. BioOil (SH)'] * (
-                row['SH. BioOil'] - row['SH. BioOil base']) / 1000000
+                row['SH. BioOil'] - row['SH. BioOil base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost BioOil'] = 0 if val < 0 else val
         val = row['CAPEX SH. BioGas'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. BioGas (SH)'] * (
-                row['SH. BioGas'] - row['SH. BioGas base']) / 1000000
+                row['SH. BioGas'] - row['SH. BioGas base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost BioGas'] = 0 if val < 0 else val
         val = row['CAPEX SH. Hydrogen'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Hydrogen (SH)'] * (
-                row['SH. Hydrogen'] - row['SH. Hydrogen base']) / 1000000
+                row['SH. Hydrogen'] - row['SH. Hydrogen base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Hydrogen'] = 0 if val < 0 else val
         val = row['CAPEX SH. Solar'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Solar (SH)'] * (
-                row['SH. Solar'] - row['SH. Solar base']) / 1000000
+                row['SH. Solar'] - row['SH. Solar base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Solar'] = 0 if val < 0 else val
         val = row['CAPEX SH. Electric space cooling'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Electric space cooling (SH)'] *\
             (row['SH. Electric space cooling'] -
-             row['SH. Electric space cooling base']) / 1000000
+             row['SH. Electric space cooling base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Electric space cooling'] = 0 if val < 0 else val
         val = row['CAPEX SH. Electricity'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space heating'] * row['EP. Electricity (SH)'] * (
-                row['SH. Electricity'] - row['SH. Electricity base']) / 1000000
+                row['SH. Electricity'] - row['SH. Electricity base']) / 1.0e+06
         dfCSV.at[index, 'SH. Cost Electricity'] = 0 if val < 0 else val
 
         # Space cooling
         val = row['CAPEX SC. Solids'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Solids (SC)'] * (
-                row['SC. Solids'] - row['SC. Solids base']) / 1000000
+                row['SC. Solids'] - row['SC. Solids base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Solids'] = 0 if val < 0 else val
         val = row['CAPEX SC. LPG'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * \
             row['EP. LPG (SC)'] * (row['SC. LPG'] -
-                                   row['SC. LPG base']) / 1000000
+                                   row['SC. LPG base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost LPG'] = 0 if val < 0 else val
         val = row['CAPEX SC. Diesel oil'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Diesel oil (SC)'] * (
-                row['SC. Diesel oil'] - row['SC. Diesel oil base']) / 1000000
+                row['SC. Diesel oil'] - row['SC. Diesel oil base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Diesel oil'] = 0 if val < 0 else val
         val = row['CAPEX SC. Gas heat pumps'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Gas heat pumps (SC)'] * (
-                row['SC. Gas heat pumps'] - row['SC. Gas heat pumps base']) / 1000000
+                row['SC. Gas heat pumps'] - row['SC. Gas heat pumps base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Gas heat pumps'] = 0 if val < 0 else val
         val = row['CAPEX SC. Natural gas'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Natural gas (SC)'] * (
-                row['SC. Natural gas'] - row['SC. Natural gas base']) / 1000000
+                row['SC. Natural gas'] - row['SC. Natural gas base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Natural gas'] = 0 if val < 0 else val
         val = row['CAPEX SC. Biomass'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Biomass (SC)'] * (
-                row['SC. Biomass'] - row['SC. Biomass base']) / 1000000
+                row['SC. Biomass'] - row['SC. Biomass base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Biomass'] = 0 if val < 0 else val
         val = row['CAPEX SC. Geothermal'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Geothermal (SC)'] * (
-                row['SC. Geothermal'] - row['SC. Geothermal base']) / 1000000
+                row['SC. Geothermal'] - row['SC. Geothermal base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Geothermal'] = 0 if val < 0 else val
         val = row['CAPEX SC. Distributed heat'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Distributed heat (SC)'] * (
-                row['SC. Distributed heat'] - row['SC. Distributed heat base']) / 1000000
+                row['SC. Distributed heat'] - row['SC. Distributed heat base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Distributed heat'] = 0 if val < 0 else val
         val = row['CAPEX SC. Advanced electric heating'] * row['Net heated floor area'] *\
             dfDwellings.at[index, 'Occ. Dwellings'] * row['Space cooling'] * row['EP. Advanced electric heating (SC)'] *\
             (row['SC. Advanced electric heating'] -
-             row['SC. Advanced electric heating base']) / 1000000
+             row['SC. Advanced electric heating base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Advanced electric heating'] = 0 if val < 0 else val
         val = row['CAPEX SC. Conventional electric heating'] * row['Net heated floor area'] *\
             dfDwellings.at[index, 'Occ. Dwellings'] * row['Space cooling'] * row['EP. Conventional electric heating (SC)'] *\
             (row['SC. Conventional electric heating'] -
-             row['SC. Conventional electric heating base']) / 1000000
+             row['SC. Conventional electric heating base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Conventional electric heating'] = 0 if val < 0 else val
         val = row['CAPEX SC. BioOil'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. BioOil (SC)'] * (
-                row['SC. BioOil'] - row['SC. BioOil base']) / 1000000
+                row['SC. BioOil'] - row['SC. BioOil base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost BioOil'] = 0 if val < 0 else val
         val = row['CAPEX SC. BioGas'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. BioGas (SC)'] * (
-                row['SC. BioGas'] - row['SC. BioGas base']) / 1000000
+                row['SC. BioGas'] - row['SC. BioGas base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost BioGas'] = 0 if val < 0 else val
         val = row['CAPEX SC. Hydrogen'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Hydrogen (SC)'] * (
-                row['SC. Hydrogen'] - row['SC. Hydrogen base']) / 1000000
+                row['SC. Hydrogen'] - row['SC. Hydrogen base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Hydrogen'] = 0 if val < 0 else val
         val = row['CAPEX SC. Solar'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Solar (SC)'] * (
-                row['SC. Solar'] - row['SC. Solar base']) / 1000000
+                row['SC. Solar'] - row['SC. Solar base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Solar'] = 0 if val < 0 else val
         val = row['CAPEX SC. Electric space cooling'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Electric space cooling (SC)'] *\
             (row['SC. Electric space cooling'] -
-             row['SC. Electric space cooling base']) / 1000000
+             row['SC. Electric space cooling base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Electric space cooling'] = 0 if val < 0 else val
         val = row['CAPEX SC. Electricity'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Space cooling'] * row['EP. Electricity (SC)'] * (
-                row['SC. Electricity'] - row['SC. Electricity base']) / 1000000
+                row['SC. Electricity'] - row['SC. Electricity base']) / 1.0e+06
         dfCSV.at[index, 'SC. Cost Electricity'] = 0 if val < 0 else val
 
         # Water heating
         val = row['CAPEX WH. Solids'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Solids (WH)'] * (
-                row['WH. Solids'] - row['WH. Solids base']) / 1000000
+                row['WH. Solids'] - row['WH. Solids base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Solids'] = 0 if val < 0 else val
         val = row['CAPEX WH. LPG'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * \
             row['EP. LPG (WH)'] * (row['WH. LPG'] -
-                                   row['WH. LPG base']) / 1000000
+                                   row['WH. LPG base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost LPG'] = 0 if val < 0 else val
         val = row['CAPEX WH. Diesel oil'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Diesel oil (WH)'] * (
-                row['WH. Diesel oil'] - row['WH. Diesel oil base']) / 1000000
+                row['WH. Diesel oil'] - row['WH. Diesel oil base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Diesel oil'] = 0 if val < 0 else val
         val = row['CAPEX WH. Gas heat pumps'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Gas heat pumps (WH)'] * (
-                row['WH. Gas heat pumps'] - row['WH. Gas heat pumps base']) / 1000000
+                row['WH. Gas heat pumps'] - row['WH. Gas heat pumps base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Gas heat pumps'] = 0 if val < 0 else val
         val = row['CAPEX WH. Natural gas'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Natural gas (WH)'] * (
-                row['WH. Natural gas'] - row['WH. Natural gas base']) / 1000000
+                row['WH. Natural gas'] - row['WH. Natural gas base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Natural gas'] = 0 if val < 0 else val
         val = row['CAPEX WH. Biomass'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Biomass (WH)'] * (
-                row['WH. Biomass'] - row['WH. Biomass base']) / 1000000
+                row['WH. Biomass'] - row['WH. Biomass base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Biomass'] = 0 if val < 0 else val
         val = row['CAPEX WH. Geothermal'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Geothermal (WH)'] * (
-                row['WH. Geothermal'] - row['WH. Geothermal base']) / 1000000
+                row['WH. Geothermal'] - row['WH. Geothermal base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Geothermal'] = 0 if val < 0 else val
         val = row['CAPEX WH. Distributed heat'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Distributed heat (WH)'] * (
-                row['WH. Distributed heat'] - row['WH. Distributed heat base']) / 1000000
+                row['WH. Distributed heat'] - row['WH. Distributed heat base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Distributed heat'] = 0 if val < 0 else val
         val = row['CAPEX WH. Advanced electric heating'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Advanced electric heating (WH)'] *\
             (row['WH. Advanced electric heating'] -
-             row['WH. Advanced electric heating base']) / 1000000
+             row['WH. Advanced electric heating base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Advanced electric heating'] = 0 if val < 0 else val
         val = row['CAPEX WH. Conventional electric heating'] * row['Net heated floor area'] *\
             dfDwellings.at[index, 'Occ. Dwellings'] * row['Water heating'] * row['EP. Conventional electric heating (WH)'] *\
             (row['WH. Conventional electric heating'] -
-             row['WH. Conventional electric heating base']) / 1000000
+             row['WH. Conventional electric heating base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Conventional electric heating'] = 0 if val < 0 else val
         val = row['CAPEX WH. BioOil'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. BioOil (WH)'] * (
-                row['WH. BioOil'] - row['WH. BioOil base']) / 1000000
+                row['WH. BioOil'] - row['WH. BioOil base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost BioOil'] = 0 if val < 0 else val
         val = row['CAPEX WH. BioGas'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. BioGas (WH)'] * (
-                row['WH. BioGas'] - row['WH. BioGas base']) / 1000000
+                row['WH. BioGas'] - row['WH. BioGas base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost BioGas'] = 0 if val < 0 else val
         val = row['CAPEX WH. Hydrogen'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Hydrogen (WH)'] * (
-                row['WH. Hydrogen'] - row['WH. Hydrogen base']) / 1000000
+                row['WH. Hydrogen'] - row['WH. Hydrogen base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Hydrogen'] = 0 if val < 0 else val
         val = row['CAPEX WH. Solar'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Solar (WH)'] * (
-                row['WH. Solar'] - row['WH. Solar base']) / 1000000
+                row['WH. Solar'] - row['WH. Solar base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Solar'] = 0 if val < 0 else val
         val = row['CAPEX WH. Electric space cooling'] * row['Net heated floor area'] *\
             dfDwellings.at[index, 'Occ. Dwellings'] * row['Water heating'] * row['EP. Electric space cooling (WH)'] *\
             (row['WH. Electric space cooling'] -
-             row['WH. Electric space cooling base']) / 1000000
+             row['WH. Electric space cooling base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Electric space cooling'] = 0 if val < 0 else val
         val = row['CAPEX WH. Electricity'] * row['Net heated floor area'] * dfDwellings.at[index, 'Occ. Dwellings'] *\
             row['Water heating'] * row['EP. Electricity (WH)'] * (
-                row['WH. Electricity'] - row['WH. Electricity base']) / 1000000
+                row['WH. Electricity'] - row['WH. Electricity base']) / 1.0e+06
         dfCSV.at[index, 'WH. Cost Electricity'] = 0 if val < 0 else val
 
     # Finish
-    print('Model: Step 16/>  [OK]')
+    print('Model: Step 17/>  [OK]')
     return dfCSV
 
 
-# Function: Build. Energy Sim. -> Model -> Step 17 -> Calculate the General Schedule for each archetype
-def executeModelStep17(dfCSV, dfSched, dfTemperatures, dfBaseTemperatures, dfSolarOffice, dfSolarNOffice, nutsId):
-    '''
-    Build. Energy Sim. -> Model -> Step 17 : Calculate the General Schedule for each archetype.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dfSched: DataFrame -> The DataFrame corresponding to Schedule.
-        dfTemperatures: DataFrame -> The DataFrame corresponding to Temperatures.
-        dfBaseTemperatures: DataFrame -> The DataFrame corresponding to Base Temperatures.
-        dfSolarOffice: DataFrame -> The DataFrame corresponding to Solar Office data.
-        dfSolarNOffice: DataFrame -> The DataFrame corresponding to Solar Non-Office data.
-        nutsId: str -> Identifier of NUTS2 region for which the analysis will be carried out.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 18 -> Calculate the General Schedule for each archetype
+def s18CalculateGeneralSchedule(dfCSV: pd.DataFrame,
+                                dfSched: pd.DataFrame,
+                                dfTemperatures: pd.DataFrame,
+                                dfBaseTemperatures: pd.DataFrame,
+                                dfSolarOffice: pd.DataFrame,
+                                dfSolarNOffice: pd.DataFrame,
+                                nutsId: str) -> dict:
+    """Model Step 18: Calculate the General Schedule for each archetype.
+
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfSched (DataFrame): The DataFrame corresponding to Schedule.
+        dfTemperatures (DataFrame): The DataFrame corresponding
+            to Temperatures.
+        dfBaseTemperatures (DataFrame): The DataFrame corresponding
+            to Base Temperatures.
+        dfSolarOffice (DataFrame): The DataFrame corresponding to Solar Office data.
+        dfSolarNOffice (DataFrame): The DataFrame corresponding to Solar Non-Office data.
+        nutsId (str): Identifier of NUTS2 region for which the
+            analysis will be carried out.
+    
+    Returns:
+        dict
+
+    """
 
     # Divide the Schedule dataframe by column value
-    print('Model: Step 17/>  Dividing the Schedule dataframe by archetypes...')
+    print('Model: Step 18/>  Dividing the Schedule dataframe by archetypes...')
     dfSchedGroups = dfSched.groupby('Use')
 
     # Archetype: Apartment block
@@ -3067,7 +3511,7 @@ def executeModelStep17(dfCSV, dfSched, dfTemperatures, dfBaseTemperatures, dfSol
     dfGenSchedSport['Hourly Temp'] = dfTemperatures['HourlyTemperature']
     dfGenSchedSport['Solar'] = dfSolarNOffice[nutsId[:2].upper()]
 
-    print('Model: Step 17/>  Building the final schedule...')
+    print('Model: Step 18/>  Building the final schedule...')
     dictSchedule = {}
     for index, row in dfCSV.iterrows():
         schedule = None
@@ -3095,21 +3539,37 @@ def executeModelStep17(dfCSV, dfSched, dfTemperatures, dfBaseTemperatures, dfSol
         }
 
     # Finish
-    print('Model: Step 17/>  [OK]')
+    print('Model: Step 18/>  [OK]')
     return dictSchedule
 
 
-# Function: Build. Energy Sim. -> Model -> Step 18 -> Calculate the Scenario
-def executeModelStep18(dfCSV, dictSchedule):
-    '''
-    Build. Energy Sim. -> Model -> Step 18 : Calculate the Scenario.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dictSchedule: dict -> The dictionary corresponding to the Schedule.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 19 -> Calculate the Scenario
+def s19CalculateScenario(dfCSV: pd.DataFrame,
+                         dictSchedule: dict) -> dict:
+    """Model Step 19: Calculate the Scenario.
 
-    print('Model: Step 18/>  Calculating the Scenario...')
-    COOLING_REDUCTION_FACTOR = 0.333
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dictSchedule (dict): The dictionary corresponding to the Schedule. Example::
+
+            {
+                "use": "Apartment Block" "schedule": DataFrame,
+                "use": "Single family- Terraced houses" "schedule" DataFrame,
+                "use": "Offices", "schedule" DataFrame,
+                "use": "Education" "schedule": DataFrame,
+                "use": "Health", "schedule": DataFrame,
+                "use": "Trade", "schedule" DataFrame,
+                "use": "Hotels and Restaurants", "schedule" DataFrame,
+                "use": "Other non-residential buildings" "schedule" DataFrame,
+                "use": "Sport", "schedule": DataFrame
+            }
+    
+    Returns:
+        dict
+
+    """
+
+    print('Model: Step 19/>  Calculating the Scenario...')
     for key, dictValue in dictSchedule.items():
         # Concatenate the necessary columns and extract the CSV row to do the calculations
         dictSchedule[key]['schedule'] = pd.concat([dictSchedule[key]['schedule'],
@@ -3141,27 +3601,27 @@ def executeModelStep18(dfCSV, dictSchedule):
 
         # Demand [KWh] -> 'D-' prefix
         dictSchedule[key]['schedule']['D-Heating'] = csv['D-Factor'].iloc[0] * \
-            dictValue['schedule']['HDH'] / 1000
+            dictValue['schedule']['HDH'] / 1.0e+03
         dictSchedule[key]['schedule']['D-Cooling'] = csv['D-Factor'].iloc[0] * \
-            dictValue['schedule']['CDH'] / 1000
+            dictValue['schedule']['CDH'] / 1.0e+03
 
         # Internal gains [KWh] -> 'IG-' prefix
         dictSchedule[key]['schedule']['IG-Lighting'] = csv['IG-Li-Factor'].iloc[0] * \
-            dictValue['schedule']['Lighting'] / 1000
+            dictValue['schedule']['Lighting'] / 1.0e+03
         dictSchedule[key]['schedule']['IG-Equipment'] = csv['IG-Eq-Factor'].iloc[0] * \
-            dictValue['schedule']['Equipment'] / 1000
+            dictValue['schedule']['Equipment'] / 1.0e+03
         dictSchedule[key]['schedule']['IG-Occupancy'] = csv['IG-Oc-Factor'].iloc[0] * \
-            dictValue['schedule']['Occupancy'] / 1000
+            dictValue['schedule']['Occupancy'] / 1.0e+03
         dictSchedule[key]['schedule']['IG-Solar'] = csv['Window Area'].iloc[0] * \
-            dictValue['schedule']['Solar'] / 1000
+            dictValue['schedule']['Solar'] / 1.0e+03
 
         # Air Renovation Losses -> 'ARL-' prefix
         dictSchedule[key]['schedule']['ARL-Heating Ventilation'] =\
             csv['ARL-Factor'].iloc[0] * (dictValue['schedule']['Base Heating Temp'] -
-                                         dictValue['schedule']['Hourly Temp']) / 1000
+                                         dictValue['schedule']['Hourly Temp']) / 1.0e+03
         dictSchedule[key]['schedule']['ARL-Cooling Ventilation'] =\
             csv['ARL-Factor'].iloc[0] * (dictValue['schedule']['Hourly Temp'] -
-                                         dictValue['schedule']['Base Cooling Temp']) / 1000
+                                         dictValue['schedule']['Base Cooling Temp']) / 1.0e+03
 
         # Demand considering Gains -> 'DG-' prefix
         dictSchedule[key]['schedule']['DG-Space Heating'] = (((dictSchedule[key]['schedule']['D-Heating'] +
@@ -3176,7 +3636,7 @@ def executeModelStep18(dfCSV, dictSchedule):
                                                                 dictSchedule[key]['schedule']['ARL-Cooling Ventilation'] + dictSchedule[key]['schedule']['IG-Lighting'] +
                                                                 dictSchedule[key]['schedule']['IG-Equipment'] + dictSchedule[key]['schedule']['IG-Occupancy'] +
                                                                 dictSchedule[key]['schedule']['IG-Solar']) * dictSchedule[key]['schedule']['Cooling']) *
-                                                              COOLING_REDUCTION_FACTOR) *
+                                                              constants.COOLING_REDUCTION_FACTOR) *
                                                              csv['Space cooling'].iloc[0]) * dwellingsValue
         dictSchedule[key]['schedule']['DG-Space Cooling'] =\
             dictSchedule[key]['schedule']['DG-Space Cooling'].apply(
@@ -3424,21 +3884,38 @@ def executeModelStep18(dfCSV, dictSchedule):
                 lambda x: 0 if (x < 0 or pd.isna(x)) else x)
 
     # Finish
-    print('Model: Step 18/>  [OK]')
+    print('Model: Step 19/>  [OK]')
     return dictSchedule
 
 
-# Function: Build. Energy Sim. -> Model -> Step 19 -> Calculate the Anual Results
-def executeModelStep19(dfCSV, dictSchedule):
-    '''
-    Build. Energy Sim. -> Model -> Step 19 : Calculate the Anual Results.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dictSchedule: dict -> The dictionary corresponding to the Schedule.
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 20 -> Calculate the Anual Results
+def s20CalculateAnualResults(dfCSV: pd.DataFrame,
+                             dictSchedule: dict) -> pd.DataFrame:
+    """Model Step 20: Calculate the Anual Results.
+
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dictSchedule (dict): The dictionary corresponding to the Schedule. Example::
+
+            {
+                "use": "Apartment Block" "schedule": DataFrame,
+                "use": "Single family- Terraced houses" "schedule" DataFrame,
+                "use": "Offices", "schedule" DataFrame,
+                "use": "Education" "schedule": DataFrame,
+                "use": "Health", "schedule": DataFrame,
+                "use": "Trade", "schedule" DataFrame,
+                "use": "Hotels and Restaurants", "schedule" DataFrame,
+                "use": "Other non-residential buildings" "schedule" DataFrame,
+                "use": "Sport", "schedule": DataFrame
+            }
+    
+    Returns:
+        DataFrame
+
+    """
 
     # Create the Anual Results dataframe
-    print('Model: Step 19/>  Building the Anual Results dataframe...')
+    print('Model: Step 20/>  Building the Anual Results dataframe...')
     dfAnualResults = dfCSV[['Building ID', 'Use', 'Age', 'Period', 'Sector',
                             'Ref%', 'Ref Level', 'Footprint Area', 'Opaque fachade area', 'Window Area',
                             'RFC Cost Low Wall', 'RFC Cost Medium Wall', 'RFC Cost High Wall',
@@ -3542,7 +4019,7 @@ def executeModelStep19(dfCSV, dictSchedule):
             row['WH. Cost Electricity']
 
     # Remove extra columns
-    print('Model: Step 19/>  Cleaning the Anual Results dataframe')
+    print('Model: Step 20/>  Cleaning the Anual Results dataframe')
     dfAnualResults = dfAnualResults.drop(columns=['Ref%', 'Ref Level', 'Footprint Area',
                                                   'Opaque fachade area', 'Window Area', 'RFC Cost Low Wall', 'RFC Cost Medium Wall', 'RFC Cost High Wall', 'RFC Cost Low Roof',
                                                   'RFC Cost Medium Roof', 'RFC Cost High Roof', 'RFC Cost Low Window', 'RFC Cost Medium Window', 'RFC Cost High Window',
@@ -3564,21 +4041,39 @@ def executeModelStep19(dfCSV, dictSchedule):
                 writer, sheet_name='Anual Results', index=False)
 
     # Finish
-    print('Model: Step 19/>  [OK]')
+    print('Model: Step 20/>  [OK]')
     return dfAnualResults
 
 
-# Function: Build. Energy Sim. -> Model -> Step 20 -> Calculate the Consolidate
-def executeModelStep20(dictSchedule, archetype):
-    '''
-    Build. Energy Sim. -> Model -> Step 20 : Calculate the Consolidate.
-    Input parameters:
-        dictSchedule: dict -> The dictionary corresponding to the Schedule.
-        archetype: str -> The name of the archetype (building use).
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 21 -> Calculate the Consolidate
+def s21CalculateConsolidate(dictSchedule: dict,
+                            archetype: str) -> pd.DataFrame:
+    """Model Step 21: Calculate the Consolidate.
+
+    Args:
+        dictSchedule (dict): The dictionary corresponding to the Schedule. Example::
+
+            {
+                "use": "Apartment Block" "schedule": DataFrame,
+                "use": "Single family- Terraced houses" "schedule" DataFrame,
+                "use": "Offices", "schedule" DataFrame,
+                "use": "Education" "schedule": DataFrame,
+                "use": "Health", "schedule": DataFrame,
+                "use": "Trade", "schedule" DataFrame,
+                "use": "Hotels and Restaurants", "schedule" DataFrame,
+                "use": "Other non-residential buildings" "schedule" DataFrame,
+                "use": "Sport", "schedule": DataFrame
+            }
+        
+        archetype (str): The name of the archetype (building use).
+    
+    Returns:
+        DataFrame
+
+    """
 
     # Create the Consolidated dataframe
-    print('Model: Step 20/>  Building the Consolidated (' +
+    print('Model: Step 21/>  Building the Consolidated (' +
           archetype + ') dataframe...')
     dfConsolidated = pd.DataFrame(0.0, columns=['Solids|Coal (Space Heating)', 'Liquids|Gas (Space Heating)',
                                                 'Liquids|Oil (Space Heating)', 'Gases|Gas (Space Heating)', 'Solids|Biomass (Space Heating)',
@@ -3656,37 +4151,62 @@ def executeModelStep20(dictSchedule, archetype):
     # Save to Excel (if allowed)
     if constants.SAVE_RESULT_ALLOWED:
         with pd.ExcelWriter('temporary/result.xlsx', mode='a') as writer:
-            dfConsolidated.to_excel(
-                writer, sheet_name='Consolidated (' + archetype[:4] + '.)', index=False)
+            dfConsolidated.to_excel(writer,
+                                    sheet_name='Consolidated (' + archetype[:4] + '.)',
+                                    index=False)
 
     # Finish
-    print('Model: Step 20/>  [OK]')
+    print('Model: Step 21/>  [OK]')
     return dfConsolidated
 
 
-# Function: Build. Energy Sim. -> Model -> Step 21 -> Calculate the Hourly Results
-def executeModelStep21(dfCSV, dictSchedule, archetype):
-    '''
-    Build. Energy Sim. -> Model -> Step 21 : Calculate the Hourly Results.
-    Input parameters:
-        dfCSV: DataFrame -> The built input data DataFrame.
-        dictSchedule: dict -> The dictionary corresponding to the Schedule.
-        archetype: str -> The name of the archetype (building use).
-    '''
+# Function: Build. Energy Sim. -> Model -> Step 22 -> Calculate the Hourly Results
+def s22CalculateHourlyResults(dfCSV: pd.DataFrame,
+                              dfSolar: pd.DataFrame,
+                              dictSchedule: dict,
+                              archetype: str) -> pd.DataFrame:
+    """Model Step 22: Calculate the Hourly Results.
+
+    Args:
+        dfCSV (DataFrame): The built input data DataFrame.
+        dfSolar (DataFrame): The solar data DataFrame.
+        dictSchedule (dict): The dictionary corresponding to the Schedule. Example::
+
+            {
+                "use": "Apartment Block" "schedule": DataFrame,
+                "use": "Single family- Terraced houses" "schedule" DataFrame,
+                "use": "Offices", "schedule" DataFrame,
+                "use": "Education" "schedule": DataFrame,
+                "use": "Health", "schedule": DataFrame,
+                "use": "Trade", "schedule" DataFrame,
+                "use": "Hotels and Restaurants", "schedule" DataFrame,
+                "use": "Other non-residential buildings" "schedule" DataFrame,
+                "use": "Sport", "schedule": DataFrame
+            }
+        
+        archetype (str): The name of the archetype (building use).
+    
+    Returns:
+        DataFrame
+
+    """
 
     # Create the Hourly Results dataframe
-    print('Model: Step 21/>  Building the Hourly Results (' +
+    print('Model: Step 22/>  Building the Hourly Results (' +
           archetype + ') dataframe...')
     dfHourlyResults = pd.DataFrame(0.0, columns=['Solids|Coal', 'Liquids|Gas', 'Liquids|Oil',
                                                  'Gases|Gas', 'Solids|Biomass', 'Electricity', 'Heat', 'Liquids|Biomass', 'Gases|Biomass', 'Hydrogen',
-                                                 'Heat|Solar', 'Variable cost [€/KWh]', 'Emissions [kgCO2/KWh]'], index=range(8760))
+                                                 'Heat|Solar', 'Variable cost [€]', 'Emissions [kgCO2]'], index=range(8760))
 
     for key, dictValue in dictSchedule.items():
         if dictValue['use'] == archetype:
             if not 'Datetime' in dfHourlyResults:
-                dfHourlyResults.insert(
-                    0, 'Datetime', dictValue['schedule']['Datetime'])
-                dfHourlyResults.insert(0, 'Building Type', dictValue['use'])
+                dfHourlyResults.insert(0,
+                                       'Datetime',
+                                       dictValue['schedule']['Datetime'])
+                dfHourlyResults.insert(0,
+                                       'Building Type',
+                                       dictValue['use'])
                 dfHourlyResults.iloc[:, 2:] = 0.0
 
             # Solids|Coal
@@ -3720,7 +4240,7 @@ def executeModelStep21(dfCSV, dictSchedule, archetype):
                 dictValue['schedule']['FC-Cooking (Biomass)-Solids|Biomass']
             dfHourlyResults['Solids|Biomass'] += solidsBiomass
 
-            # Electricity
+            # Electricity: substract the value of the solar energy
             electricity = dictValue['schedule']['FC-Space heating (Geothermal)-Electricity'] +\
                 dictValue['schedule']['FC-Space heating (Advanced electric heating)-Electricity'] +\
                 dictValue['schedule']['FC-Space heating (Conventional electric heating)-Electricity'] +\
@@ -3731,7 +4251,7 @@ def executeModelStep21(dfCSV, dictSchedule, archetype):
                 dictValue['schedule']['FC-Lighting (Electricity)-Electricity'] +\
                 dictValue['schedule']['FC-Appliances (Electricity)-Electricity'] +\
                 dictValue['schedule']['FC-Cooking (Electricity)-Electricity']
-            dfHourlyResults['Electricity'] += electricity
+            dfHourlyResults['Electricity'] += (electricity.values - ((dfSolar[archetype].values) / 1.0e+03))
 
             # Heat
             heat = dictValue['schedule']['FC-Space heating (Distributed heat)-Heat'] +\
@@ -3762,44 +4282,55 @@ def executeModelStep21(dfCSV, dictSchedule, archetype):
             csv = csv.loc[csv.index.repeat(
                 len(dictValue['schedule']) - len(csv))].reset_index(drop=True)
 
-            # Variable cost [€/KWh]
-            dfHourlyResults['Variable cost [€/KWh]'] += (solidsCoal * csv['OPEX Variable cost Solids|Coal']) +\
+            # Variable cost [€]
+            dfHourlyResults['Variable cost [€]'] += ((solidsCoal * csv['OPEX Variable cost Solids|Coal']) +\
                 (liquidsGas * csv['OPEX Variable cost Liquids|Gas']) + (liquidsOil * csv['OPEX Variable cost Liquids|Oil']) +\
                 (gasesGas * csv['OPEX Variable cost Gases|Gas']) + (solidsBiomass * csv['OPEX Variable cost Solids|Biomass']) +\
                 (electricity * csv['OPEX Variable cost Electricity']) + (heat * csv['OPEX Variable cost Heat']) +\
                 (liquidsBiomass * csv['OPEX Variable cost Liquids|Biomass']) + (gasesBiomass * csv['OPEX Variable cost Gases|Biomass']) +\
                 (hydrogen * csv['OPEX Variable cost Hydrogen']) + \
-                (heatSolar * csv['OPEX Variable cost Heat|Solar'])
+                (heatSolar * csv['OPEX Variable cost Heat|Solar']))
 
-            # Emissions [kgCO2/KWh]
-            dfHourlyResults['Emissions [kgCO2/KWh]'] += (solidsCoal * csv['OPEX Emissions Solids|Coal']) +\
+            # Emissions [kgCO2]
+            dfHourlyResults['Emissions [kgCO2]'] += ((solidsCoal * csv['OPEX Emissions Solids|Coal']) +\
                 (liquidsGas * csv['OPEX Emissions Liquids|Gas']) + (liquidsOil * csv['OPEX Emissions Liquids|Oil']) +\
                 (gasesGas * csv['OPEX Emissions Gases|Gas']) + (solidsBiomass * csv['OPEX Emissions Solids|Biomass']) +\
                 (electricity * csv['OPEX Emissions Electricity']) + (heat * csv['OPEX Emissions Heat']) +\
                 (liquidsBiomass * csv['OPEX Emissions Liquids|Biomass']) + (gasesBiomass * csv['OPEX Emissions Gases|Biomass']) +\
                 (hydrogen * csv['OPEX Emissions Hydrogen']) + \
-                (heatSolar * csv['OPEX Emissions Heat|Solar'])
+                (heatSolar * csv['OPEX Emissions Heat|Solar']))
 
     # Save to Excel (if allowed)
     if constants.SAVE_RESULT_ALLOWED:
         with pd.ExcelWriter('temporary/result.xlsx', mode='a') as writer:
-            dfHourlyResults.to_excel(
-                writer, sheet_name='Hourly Results (' + archetype[:4] + '.)', index=False)
+            dfHourlyResults.to_excel(writer,
+                                     sheet_name='Hourly Results (' + archetype[:4] + '.)',
+                                     index=False)
 
     # Finish
-    print('Model: Step 21/>  [OK]')
+    print('Model: Step 22/>  [OK]')
     return dfHourlyResults
 
 
-# Auxiliary function: Add Feb. 29 if missing (for temperatures data)
-def addFeb29IfMissingForTemperaturesData(df: pd.DataFrame, targetYear: int) -> pd.DataFrame:
-    '''
-    Build. Energy Sim. -> Aux function : If the destination year is a leap year
+#####################################################################
+######################## Auxiliary functions ########################
+#####################################################################
+
+
+# Auxiliary function 01: Add Feb. 29 if missing (for temperatures data)
+def x01AddFeb29IfMissingForTemperaturesData(df: pd.DataFrame,
+                                            targetYear: int) -> pd.DataFrame:
+    """Auxiliary function 01: If the destination year is a leap year
         and the original year was not, replace 28-Feb with 29-Feb.
-    Input parameters:
-        df: DataFrame -> The source DataFrame.
-        targetYear: int -> The target year.
-    '''
+
+    Args:
+        df (DataFrame): The source DataFrame.
+        targetYear (int): The target year.
+    
+    Returns:
+        DataFrame
+    """
+
     if not isleap(targetYear):
         return df
     if ((df.index.month == 2) & (df.index.day == 29)).any():
@@ -3810,70 +4341,337 @@ def addFeb29IfMissingForTemperaturesData(df: pd.DataFrame, targetYear: int) -> p
     feb29Start = pd.Timestamp(f"{targetYear}-02-29 00:00:00")
     feb29End = pd.Timestamp(f"{targetYear}-02-29 23:00:00")
 
-    feb28Hours = pd.date_range(feb28Start, feb28End, freq="H")
+    feb28Hours = pd.date_range(feb28Start,
+                               feb28End,
+                               freq="H")
     if not set(feb28Hours).issubset(set(df.index)):
         return df
 
     feb28 = df.loc[feb28Hours].copy()
-    feb28.index = pd.date_range(feb29Start, feb29End, freq="H")
+    feb28.index = pd.date_range(feb29Start,
+                                feb29End,
+                                freq="H")
     out = pd.concat([df, feb28]).sort_index()
     return out
 
 
-# Auxiliary function: Add Feb. 29 if missing (for radiation data)
-def addFeb29IfMissingForRadiationData(df: pd.DataFrame, targetYear: int) -> pd.DataFrame:
-    '''
-    Build. Energy Sim. -> Aux function : If the destination year is a leap year
+# Auxiliary function 02: Add Feb. 29 if missing (for radiation data)
+def x02AddFeb29IfMissingForRadiationData(df: pd.DataFrame,
+                                         targetYear: int) -> pd.DataFrame:
+    """Auxiliary function 02: If the destination year is a leap year
         and the original year was not, replace 28-Feb with 29-Feb.
-    Input parameters:
-        df: DataFrame -> The source DataFrame.
-        targetYear: int -> The target year.
-    '''
+
+    Args:
+        df (DataFrame): The source DataFrame.
+        targetYear (int): The target year.
+    
+    Returns:
+        DataFrame
+    """
+
     if not isleap(targetYear):
         return df
     if ((df.index.month == 2) & (df.index.day == 29)).any():
         return df
-    feb28Hours = pd.date_range(
-        f"{targetYear}-02-28 00:00:00", f"{targetYear}-02-28 23:00:00", freq="h")
+    feb28Hours = pd.date_range(f"{targetYear}-02-28 00:00:00",
+                               f"{targetYear}-02-28 23:00:00",
+                               freq="h")
     if not set(feb28Hours).issubset(set(df.index)):
         return df
     feb28 = df.loc[feb28Hours].copy()
-    feb28.index = pd.date_range(
-        f"{targetYear}-02-29 00:00:00", f"{targetYear}-02-29 23:00:00", freq="h")
+    feb28.index = pd.date_range(f"{targetYear}-02-29 00:00:00",
+                                f"{targetYear}-02-29 23:00:00",
+                                freq="h")
     return pd.concat([df, feb28]).sort_index()
 
 
-# Auxiliary function: Drop Feb. 29 if present (for temperatures data)
-def dropFeb29IfPresentForTemperaturesData(df: pd.DataFrame) -> pd.DataFrame:
-    '''
-    Build. Energy Sim. -> Aux function : Delete the rows for February 29 (if they exist).
-    Input parameters:
-        df: DataFrame -> The source DataFrame.
-    '''
+# Auxiliary function 03: Drop Feb. 29 if present (for temperatures data)
+def x03DropFeb29IfPresentForTemperaturesData(df: pd.DataFrame) -> pd.DataFrame:
+    """Auxiliary function 03: Delete the rows for February 29 (if they exist).
+
+    Args:
+        df (DataFrame): The source DataFrame.
+    
+    Returns:
+        DataFrame
+    """
+
     mask = (df.index.month == 2) & (df.index.day == 29)
     if mask.any():
         return df.loc[~mask]
     return df
 
 
-# Auxiliary function: Drop Feb. 29 if present (for radiation data)
-def dropFeb29IfPresentForRadiationData(df: pd.DataFrame) -> pd.DataFrame:
-    '''
-    Build. Energy Sim. -> Aux function : Delete the rows for February 29 (if they exist).
-    Input parameters:
-        df: DataFrame -> The source DataFrame.
-    '''
+# Auxiliary function 04: Drop Feb. 29 if present (for radiation data)
+def x04DropFeb29IfPresentForRadiationData(df: pd.DataFrame) -> pd.DataFrame:
+    """Auxiliary function 04: Delete the rows for February 29 (if they exist).
+
+    Args:
+        df (DataFrame): The source DataFrame.
+    
+    Returns:
+        DataFrame
+    """
+
     return df.loc[~((df.index.month == 2) & (df.index.day == 29))]
 
 
-# Auxiliary function: Remap year
-def remapYear(tsIndex: pd.DatetimeIndex, targetYear: int) -> pd.DatetimeIndex:
-    '''
-    Build. Energy Sim. -> Aux function : Change the year of a DatetimeIndex while keeping
+# Auxiliary function 05: Remap year
+def x05RemapYear(tsIndex: pd.DatetimeIndex,
+                 targetYear: int) -> pd.DatetimeIndex:
+    """Auxiliary function 05: Change the year of a DatetimeIndex while keeping
         the month/day/hour/minute/second values.
-    Input parameters:
-        tsIndex: DatetimeIndex -> The source DatetimeIndex.
-        targetYear: int -> The target year.
-    '''
-    return tsIndex.map(lambda t: pd.Timestamp(year=targetYear, month=t.month, day=t.day,
-                                              hour=t.hour, minute=t.minute, second=t.second))
+
+    Args:
+        tsIndex (DatetimeIndex): The source DatetimeIndex.
+        targetYear (int): The target year.
+    
+    Returns:
+        DatetimeIndex
+    """
+
+    return tsIndex.map(lambda t: pd.Timestamp(year=targetYear,
+                                              month=t.month,
+                                              day=t.day,
+                                              hour=t.hour,
+                                              minute=t.minute,
+                                              second=t.second))
+
+
+# Auxiliary function 06: Establish value between limits
+def x06EstablishValue(dict: dict,
+                      name: str,
+                      limitDown: float,
+                      limitUp: float,
+                      defaultValue: float) -> float:
+    """Auxiliary function 06: Establish value between limits.
+
+    Args:
+        dict (dict): The source dictionary.
+        name (str): The source property.
+        limitDown (float): The lower limit of the value.
+        limitUp (float): The upper limit of the value.
+        defaultValue (float): The default value.
+    
+    Returns:
+        float
+    """
+
+    if name in dict:
+        value = dict[name]
+        if value is not None:
+            if limitDown <= value <= limitUp:
+                return value
+            else:
+                return defaultValue
+        else:
+            return value
+    else:
+        return defaultValue
+
+
+# Auxiliary function 07: Obtain the available area
+def x07GetAvailableArea(parameters: list,
+                        cost: float,
+                        landUse: float) -> tuple:
+    """Auxiliary function 07: Obtain the available area.
+
+    Args:
+        parameters (list): The list of parameters.
+        cost (float): The value of the cost.
+        landUse (float): The value of the land use.
+    
+    Returns:
+        tuple
+    """
+
+    index = next((i for i, value in enumerate(parameters) if value is not None), -1)
+    if index == 2:
+        capex = parameters[index]
+        power = parameters[index] / (cost * 1.0e+06)            # in MW
+        areaAvailable = power * 1.0e+06 / landUse               # in m2
+    elif index == 1:
+        areaAvailable = parameters[index] * 1.0e+06 / landUse   # in m2
+        power = parameters[index]
+        capex = power * cost * 1.0e+06
+    else:
+        areaAvailable = parameters[0]                           # in m2
+        power = (areaAvailable * landUse) / 1.0e+06             # in MW
+        capex = power * cost * 1.0e+06
+
+    return areaAvailable, power, capex
+
+
+# Auxiliary function 08: Obtain the regions
+def x08GetRegions(dictScada: dict,
+                  area: float,
+                  minGhi: float) -> tuple:
+    """Auxiliary function 08: Obtain the regions.
+
+    Args:
+        dictScada (DataFrame): The scada dataframe.
+        area (float): The value of the area.
+        minGhi (float): The value of the min GHI.
+    
+    Returns:
+        tuple
+    """
+
+    currentSum = 0
+    nameNuts2 = None
+    rows = []
+    for index, row in dictScada.iterrows():
+        if nameNuts2 is None:
+            nameNuts2 = row['Region'][:-1]
+        if row['Area_m2'] > 0:
+            if currentSum + row['Area_m2'] > area and row['Threshold'] >= minGhi:
+                row['Area_m2'] = area - currentSum
+                currentSum += row['Area_m2']
+                rows.append(row)
+                break
+            currentSum += row['Area_m2']
+            rows.append(row)
+
+    return rows, nameNuts2
+
+
+# Auxiliary function 09: Obtain the PV production
+def x09GetPVProduction(rows: list,
+                       landUse: float,
+                       tilt: float,
+                       distribAzimuth: float,
+                       tracking: float,
+                       loss: float,
+                       porcent: float,
+                       year: int) -> list:
+    """Auxiliary function 09: Obtain the PV production.
+
+    Args:
+        rows (list): The list of rows.
+        landUse (float): The value of the land use.
+        tilt (float): The value of the tilt.
+        distribAzimuth (float): The value of the distribAzimuth.
+        tracking (float): The value of the tracking.
+        loss (float): The value of the loss.
+        porcent (float): The value of the porcent.
+        year (int): The year.
+    
+    Returns:
+        list
+    """
+
+    production = []
+    for region in rows:
+        lon, lat = region['Median_Radiation_X'], region['Median_Radiation_Y']
+
+        # Convert coordinates from EPSG:3035 to EPSG:4326
+        if constants.CONVERT_COORD or lat > 180: 
+            lon, lat = x11GetCoordinates(region)
+
+        pot_MW = (region['Area_m2'] * landUse) / 1.0e+06
+        region['power_installed(kW)'] = pot_MW
+        factor = 1
+
+        if pot_MW * 1.0e+03 > 1.0e+08:
+            pot_MW = pot_MW / 1.0e+03
+            factor = 1.0e+03
+
+        prod = []
+        for i in range(len(porcent)):
+            df, params, meta = pvlib.iotools.get_pvgis_hourly(latitude=lat,
+                                                              longitude=lon,
+                                                              start=year,
+                                                              end=year,
+                                                              raddatabase='PVGIS-SARAH2',
+                                                              surface_tilt=tilt,
+                                                              surface_azimuth=distribAzimuth[i],
+                                                              pvcalculation=True,
+                                                              peakpower=pot_MW * 1000 * porcent[i],
+                                                              trackingtype=tracking,
+                                                              loss=loss,
+                                                              components=False,
+                                                              url='https://re.jrc.ec.europa.eu/api/v5_2/')
+            prod.append(df['P'])
+
+        region['production'] = (pd.DataFrame(prod).sum(axis=0)) * factor / 1.0e+06  # to MW
+        production.append((pd.DataFrame(prod).sum(axis=0) * factor / 1.0e+06))  # to MW
+
+    return production
+
+
+# Auxiliary function 10: Obtain the distribution
+def x10GetDistribution(rows: list,
+                       label: str) -> tuple:
+    """Auxiliary function 10: Obtain the distribution.
+
+    Args:
+        rows (list): The list of rows.
+        label (str): The label.
+    
+    Returns:
+        tuple
+    """
+
+    res = []
+    for i in rows:
+        if i['Region'] not in res:
+            res.append(i['Region'])
+
+    df = pd.DataFrame(rows)
+    sumNuts = []
+    sumAreas = []
+    sumPots = []
+    for i in res:
+        nuts = df.loc[i == df['Region']][label]
+        df_nuts = pd.DataFrame(nuts.tolist())
+        sumNuts.append(df_nuts.sum())
+        areasNuts3 = df.loc[i == df['Region']]['Area_m2']
+        potNuts3 = df.loc[i == df['Region']]['power_installed(kW)']
+        sumAreas.append(pd.DataFrame(areasNuts3.tolist()).sum())
+        sumPots.append(pd.DataFrame(potNuts3.tolist()).sum())
+
+    areas = dict(zip(res, [x[0] for x in sumAreas]))
+    pots = dict(zip(res, [x[0] for x in sumPots]))
+
+    nuts2 = pd.DataFrame(sumNuts, index=res).transpose()
+    nuts2 = nuts2.dropna(axis=1)
+    nuts2.index = pd.to_datetime(nuts2.index).round('h').strftime('%m/%d/%Y %H:%M')
+
+    return nuts2, pots, areas
+
+
+# Auxiliary function 11: Obtain the coordinates
+def x11GetCoordinates(sourceDF: pd.DataFrame) -> tuple:
+    """Auxiliary function 11: Obtain the coordinates.
+
+    Args:
+        sourceDF (DataFrame): The source DataFrame.
+    
+    Returns:
+        tuple
+    """
+    
+    transformer = Transformer.from_crs("EPSG:3035", "EPSG:4326",
+                                       always_xy=True)
+    xy = transformer.transform(sourceDF['Median_Radiation_X'],
+                               sourceDF['Median_Radiation_Y'])
+    return xy[0], xy[1]
+
+
+# Auxiliary function 12: Calculate the OPEX
+def x12CalculateOPEX(pot: dict,
+                     opexPV: float) -> tuple:
+    """Auxiliary function 12: Calculate the OPEX.
+
+    Args:
+        pot (dict): The pot dictionary.
+        opexPV (float): The OPEX for PV.
+    
+    Returns:
+        tuple
+    """
+
+    sumPV = 0
+    for key, value in pot.items():
+        sumPV += value
+    return sumPV * opexPV

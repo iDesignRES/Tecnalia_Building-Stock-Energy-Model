@@ -17,8 +17,9 @@
 import copy
 import json
 import re
-from pathlib import Path
+
 from building_stock_energy_model import validator
+from pathlib import Path
 
 
 TEST_INPUT_PATH = str(Path(__file__).parent / 'input_test.json')
@@ -40,7 +41,8 @@ def test_invalidPayload():
     with open(TEST_INPUT_PATH, 'r') as payloadFile:
         # Load and iterate the payload
         processPayload = json.load(payloadFile)
-        iteratePayload(processPayload, True)
+        iteratePayload(processPayload,
+                       True)
 
     assert exceptionsRaised > 0
 
@@ -60,7 +62,8 @@ def test_wrongValuesPayload():
     with open(TEST_INPUT_PATH, 'r') as payloadFile:
         # Load and iterate the payload
         processPayload = json.load(payloadFile)
-        iteratePayload(processPayload, False)
+        iteratePayload(processPayload,
+                       False)
 
     assert exceptionsRaised > 0
 
@@ -94,13 +97,16 @@ def test_validPayload():
 
 
 # Function: Iterate a payload recursively
-def iteratePayload(payload, doRemove, prefix='', payloadRoot=None):
+def iteratePayload(payload: dict,
+                   doRemove: bool,
+                   prefix='',
+                   payloadRoot=None):
     '''
     Function to iterate a payload recursively.
     Input parameters:
         payload: dict -> The current payload to iterate.
-        doRemove: boolean -> Indicates if a value has to be removed (True) or modified (False).
-        prefix: text -> The property prefix.
+        doRemove: bool -> Indicates if a value has to be removed (True) or modified (False).
+        prefix: str -> The property prefix.
         payloadRoot: dict -> The original payload.
     '''
     global exceptionsRaised
@@ -116,32 +122,42 @@ def iteratePayload(payload, doRemove, prefix='', payloadRoot=None):
             if not isinstance(value, (dict, list)):
                 try:
                     if doRemove:
-                        deletePropertyByPath(payloadCopy, fullKey)
+                        deletePropertyByPath(payloadCopy,
+                                             fullKey)
                     else:
-                        new_value = - \
-                            10000 if isinstance(value, (int, float)) else 'XXX'
-                        setPropertyByPath(payloadCopy, fullKey, new_value)
+                        newValue = - \
+                            10000 if isinstance(value,
+                                                (int, float)) else 'XXX'
+                        setPropertyByPath(payloadCopy,
+                                          fullKey,
+                                          newValue)
                 except Exception as e:
                     continue
                 try:
                     validator.validateProcessPayload(payloadCopy)
                 except Exception as e:
                     exceptionsRaised += 1
-            iteratePayload(value, doRemove, prefix=fullKey,
+            iteratePayload(value,
+                           doRemove,
+                           prefix=fullKey,
                            payloadRoot=payloadRoot)
     elif isinstance(payload, list):
         for i, item in enumerate(payload):
             iteratePayload(
-                item, doRemove, prefix=f"{prefix}[{i}]", payloadRoot=payloadRoot)
+                item,
+                doRemove,
+                prefix=f"{prefix}[{i}]",
+                payloadRoot=payloadRoot)
 
 
 # Function: Delete a property given its path
-def deletePropertyByPath(payload, path):
+def deletePropertyByPath(payload: dict,
+                         path: str):
     '''
     Function to delete a property given its path.
     Input parameters:
         payload: dict -> The original payload.
-        path: text -> The source path.
+        path: str -> The source path.
     '''
 
     keys = parsePropertyFullPath(path)
@@ -152,13 +168,15 @@ def deletePropertyByPath(payload, path):
 
 
 # Function: Change the value of a property given its path
-def setPropertyByPath(payload, path, value):
+def setPropertyByPath(payload: dict,
+                      path: str,
+                      value: str):
     '''
     Function to change the value of a property given its path.
     Input parameters:
         payload: dict -> The original payload.
-        path: text -> The source path.
-        value: text -> The new value to set.
+        path: str -> The source path.
+        value: str -> The new value to set.
     '''
 
     keys = parsePropertyFullPath(path)
@@ -169,11 +187,11 @@ def setPropertyByPath(payload, path, value):
 
 
 # Function: Parse the full path of a property
-def parsePropertyFullPath(path):
+def parsePropertyFullPath(path: str) -> list:
     '''
     Function to convert a path like 'a.b[2].c' in a path like ['a', 'b', 2, 'c'].
     Input parameters:
-        path: text -> The source path.
+        path: str -> The source path.
     '''
 
     parts = []
