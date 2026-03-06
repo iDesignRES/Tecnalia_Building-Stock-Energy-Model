@@ -1,6 +1,6 @@
 # iDesignRES: Building Stock Energy Model
 
-[![Docs](https://img.shields.io/badge/docs-stable-brightgreen)](https://molinuevo.github.io/molinuevobuildings)
+[![Docs](https://img.shields.io/badge/docs-stable-brightgreen)](https://idesignres.github.io/Tecnalia_Building-Stock-Energy-Model)
 
 This README provides an overview of the Model iDesignRES Building Stock Energy Model within iDesignRES.
 
