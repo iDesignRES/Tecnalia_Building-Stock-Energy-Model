@@ -6,7 +6,7 @@
         <link rel="canonical" href="https://idesignres.github.io/Tecnalia_Building-Stock-Energy-Model/_modules/building_stock_energy_model/validator.html">
 
     <!-- Generated with Sphinx 8.1.2 and Furo 2025.09.25 -->
-        <title>building_stock_energy_model.validator - iDesignRES - Solar Energy Model</title>
+        <title>building_stock_energy_model.validator - iDesignRES - Building Stock Energy Model</title>
       <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../../_static/styles/furo.css?v=580074bf" />
     <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
@@ -164,7 +164,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../../index.html"><div class="brand">iDesignRES - Solar Energy Model</div></a>
+      <a href="../../index.html"><div class="brand">iDesignRES - Building Stock Energy Model</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -185,7 +185,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../../index.html">
   
-  <span class="sidebar-brand-text">iDesignRES - Solar Energy Model</span>
+  <span class="sidebar-brand-text">iDesignRES - Building Stock Energy Model</span>
   
 </a><form class="sidebar-search-container" method="get" action="../../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -298,9 +298,9 @@
 <span class="sd">            [</span>
 <span class="sd">                &quot;building_energy_process.py&quot;,</span>
 <span class="sd">                &quot;input.json&quot;,</span>
-<span class="sd">                &quot;2019-03-01T13:00:00&quot;,</span>
-<span class="sd">                &quot;2019-03-02T13:00:00&quot;,</span>
-<span class="sd">                &quot;Offices&quot;</span>
+<span class="sd">                &quot;2019-03-01T13:00:00&quot;  (Optional),</span>
+<span class="sd">                &quot;2019-03-02T13:00:00&quot;  (Optional),</span>
+<span class="sd">                &quot;Offices&quot;  (Optional)</span>
 <span class="sd">            ]</span>
 <span class="sd">    </span>
 <span class="sd">    Returns:</span>
@@ -309,37 +309,39 @@
 <span class="sd">    &quot;&quot;&quot;</span>
 
     <span class="c1"># Validate the parameters</span>
-    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parameters</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">5</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parameters</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">2</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">parameters</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">5</span><span class="p">:</span>
         <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
-            <span class="s1">&#39;Validator/&gt;  The number of input parameters is incorrect! (5)&#39;</span><span class="p">)</span>
+            <span class="s1">&#39;Validator/&gt;  The number of input parameters is incorrect! (2 or 5)&#39;</span><span class="p">)</span>
 
     <span class="c1"># Validate if the payload file exists</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">parameters</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()):</span>
         <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
             <span class="s1">&#39;Validator/&gt;  The process input data file does not exist!&#39;</span><span class="p">)</span>
 
-    <span class="c1"># Validate the datetime objects</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">parameters</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
-                          <span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1">T%H:%M:%S&#39;</span><span class="p">)</span>
-    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
-            <span class="s1">&#39;Validator/&gt;  The third input parameter (start datetime) has an incorrect format (yyyy-MM-ddTHH:mm:ss)&#39;</span><span class="p">)</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">parameters</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span>
-                          <span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1">T%H:%M:%S&#39;</span><span class="p">)</span>
-    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
-            <span class="s1">&#39;Validator/&gt;  The fourth input parameter (end datetime) has an incorrect format (yyyy-MM-ddTHH:mm:ss)&#39;</span><span class="p">)</span>
-    <span class="k">if</span> <span class="p">(</span><span class="n">parameters</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">2</span><span class="p">]):</span>
-        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
-            <span class="s1">&#39;Validator/&gt;  The end time cannot be less than the start time!&#39;</span><span class="p">)</span>
+    <span class="c1"># Validate the datetime objects (if they exist)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parameters</span><span class="p">)</span> <span class="o">==</span> <span class="mi">5</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="ow">and</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">3</span><span class="p">]:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">parameters</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+                                <span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1">T%H:%M:%S&#39;</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
+                    <span class="s1">&#39;Validator/&gt;  The third input parameter (start datetime) has an incorrect format (yyyy-MM-ddTHH:mm:ss)&#39;</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">parameters</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span>
+                                <span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1">T%H:%M:%S&#39;</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
+                    <span class="s1">&#39;Validator/&gt;  The fourth input parameter (end datetime) has an incorrect format (yyyy-MM-ddTHH:mm:ss)&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">parameters</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">2</span><span class="p">]):</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
+                    <span class="s1">&#39;Validator/&gt;  The end time cannot be less than the start time!&#39;</span><span class="p">)</span>
 
-    <span class="c1"># Validate the building use</span>
-    <span class="k">if</span> <span class="ow">not</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">constants</span><span class="o">.</span><span class="n">BUILDING_USES</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;Validator/&gt;  The building use must be one of the following: &#39;</span>
-                        <span class="s1">&#39;&quot;Apartment Block&quot;, &quot;Single family- Terraced houses&quot;, &quot;Hotels and Restaurants&quot;,&#39;</span>
-                        <span class="s1">&#39;&quot;Health&quot;, &quot;Education&quot;, &quot;Offices&quot;, &quot;Trade&quot;, &quot;Other non-residential buildings&quot;, &quot;Sport&quot;&#39;</span><span class="p">)</span></div>
+        <span class="c1"># Validate the building use (if it exists)</span>
+        <span class="k">if</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span> <span class="ow">and</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">and</span> <span class="n">parameters</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">constants</span><span class="o">.</span><span class="n">BUILDING_USES</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;Validator/&gt;  The building use must be one of the following: &#39;</span>
+                            <span class="s1">&#39;&quot;Apartment Block&quot;, &quot;Single family- Terraced houses&quot;, &quot;Hotels and Restaurants&quot;,&#39;</span>
+                            <span class="s1">&#39;&quot;Health&quot;, &quot;Education&quot;, &quot;Offices&quot;, &quot;Trade&quot;, &quot;Other non-residential buildings&quot;, &quot;Sport&quot;&#39;</span><span class="p">)</span></div>
 
 
 
@@ -384,9 +386,14 @@
     <span class="k">if</span> <span class="ow">not</span> <span class="s1">&#39;nutsid&#39;</span> <span class="ow">in</span> <span class="n">payload</span> <span class="ow">or</span> <span class="n">payload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
             <span class="s1">&#39;Validator/&gt;  The following property is not present or has a null value: &quot;nutsid&quot;&#39;</span><span class="p">)</span>
-    <span class="k">if</span> <span class="n">payload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">constants</span><span class="o">.</span><span class="n">REGION_LIST</span><span class="p">:</span>
+    <span class="n">nutsids</span> <span class="o">=</span> <span class="n">payload</span><span class="p">[</span><span class="s1">&#39;nutsid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;,&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">nutsids</span><span class="p">:</span>
         <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
             <span class="s1">&#39;Validator/&gt;  The following property has an invalid value: &quot;nutsid&quot;&#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">nutsid</span> <span class="ow">in</span> <span class="n">nutsids</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">nutsid</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">constants</span><span class="o">.</span><span class="n">REGION_LIST</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
+                <span class="s1">&#39;Validator/&gt;  The following property has an invalid region: &quot;nutsid&quot;&#39;</span><span class="p">)</span>
 
     <span class="c1"># Validate the property: year</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="s1">&#39;year&#39;</span> <span class="ow">in</span> <span class="n">payload</span> <span class="ow">or</span> <span class="n">payload</span><span class="p">[</span><span class="s1">&#39;year&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
