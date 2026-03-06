@@ -95,18 +95,23 @@ def s02RetrieveTemperatures(nutsId: str,
         '07-DemandNinja_Temperature_DB.csv'
     df = pd.read_csv(csvPath,
                      sep=';')
+    
+    # Normalize the NutsID
+    nutsIdNormalized = nutsId
+    if nutsId in constants.NORMALIZED_REGIONS:
+        nutsIdNormalized = constants.NORMALIZED_REGIONS[nutsId]
 
     # Filter for the row that contains the country code
-    row = df[df['CNTR_CODE'] == nutsId[:2]]
+    row = df[df['CNTR_CODE'] == nutsIdNormalized[:2]]
     if row.empty:
-        raise ValueError('Model: Step 02/>  ' + nutsId[:2] + ' not mapped!')
+        raise ValueError('Model: Step 02/>  ' + nutsIdNormalized[:2] + ' not mapped!')
 
     print('Model: Step 02/>  Connecting and downloading...')
     response = requests.get(row['PopWgt'].values[0],
                             timeout=60)
     if response.status_code != 200:
         raise ValueError(
-            'Model: Step 02/>  The temepratures data could not be downloaded!')
+            'Model: Step 02/>  The temperatures data could not be downloaded!')
 
     print('Model: Step 02/>  Loading and filtering the downloaded data...')
     downloadedData = pd.read_csv(io.StringIO(
@@ -121,13 +126,13 @@ def s02RetrieveTemperatures(nutsId: str,
                                             utc=True).dt.tz_convert(None)
 
     # Choose region column
-    regionCode = nutsId[:4]
+    regionCode = nutsIdNormalized[:4]
     if regionCode in downloadedData.columns:
         selectedRegion = regionCode
     elif regionCode[:3] in downloadedData.columns:
         selectedRegion = regionCode[:3]
     else:
-        selectedRegion = nutsId[:2]
+        selectedRegion = nutsIdNormalized[:2]
 
     # Determine the range of years available for the downloaded CSV file.
     yearsAvailable = downloadedData['time'].dt.year.unique()
@@ -249,11 +254,16 @@ def s03RetrieveRadiationValues(nutsId: str,
         '06-DemandNinja_Radiation_DB.csv'
     df = pd.read_csv(csvPath,
                      sep=';')
+    
+    # Normalize the NutsID
+    nutsIdNormalized = nutsId
+    if nutsId in constants.NORMALIZED_REGIONS:
+        nutsIdNormalized = constants.NORMALIZED_REGIONS[nutsId]
 
     # Filter for the row that contains the country code
-    row = df[df['CNTR_CODE'] == nutsId[:2]]
+    row = df[df['CNTR_CODE'] == nutsIdNormalized[:2]]
     if row.empty:
-        raise ValueError('Model: Step 03/> ' + nutsId[:2] + ' not mapped!')
+        raise ValueError('Model: Step 03/> ' + nutsIdNormalized[:2] + ' not mapped!')
 
     print('Model: Step 03/>  Connecting and downloading...')
     response = requests.get(row['PopWgt'].values[0])
@@ -272,13 +282,13 @@ def s03RetrieveRadiationValues(nutsId: str,
                                             utc=True).dt.tz_convert(None)
 
     # Region column selection
-    regionCode = nutsId[:4]
+    regionCode = nutsIdNormalized[:4]
     if regionCode in downloadedData.columns:
         selectedRegion = regionCode
     elif regionCode[:3] in downloadedData.columns:
         selectedRegion = regionCode[:3]
     else:
-        selectedRegion = nutsId[:2]
+        selectedRegion = nutsIdNormalized[:2]
 
     # Detect available years range and establish the source year
     availableYears = downloadedData['time'].dt.year.unique()
@@ -305,7 +315,7 @@ def s03RetrieveRadiationValues(nutsId: str,
                                                        year)
 
     # Rename the column to the original nuts code
-    src = src.rename(columns={selectedRegion: nutsId})
+    src = src.rename(columns={selectedRegion: nutsIdNormalized})
 
     # Date format to export
     src.index = src.index.strftime('%m/%d/%Y %H:%M')
@@ -313,7 +323,7 @@ def s03RetrieveRadiationValues(nutsId: str,
     # Save to the temporary directory
     print('Model: Step 03/>  Saving as CSV to the temporary directory...')
     csvPath = Path(__file__).parent.parent / \
-        'temporary' / f'{selectedRegion}_Radiation.csv'
+        'temporary' / f'{nutsId}_Radiation.csv'
     src.to_csv(csvPath,
                sep=';',
                decimal=',')
@@ -514,7 +524,8 @@ def s04LoadDatabase(nutsId: str,
 def s05RetrieveSolarData(nutsId: str,
                          year: int,
                          listInputJsonSolar: list,
-                         dictDBBuildings: dict):
+                         dictDBBuildings: dict,
+                         dfTemperatures: pd.DataFrame):
     """Model Step 05: Retrieve radiation values.
 
     Args:
@@ -599,14 +610,13 @@ def s05RetrieveSolarData(nutsId: str,
         dfSolarArch = dfSolar[dfSolar['Building_Use'] == archetype]
         for element in listInputJsonSolar:
             if element['building_use'] == archetype:
-                # Merge with de information loaded from the database
+                # Merge with the information loaded from the database
                 dictArchetype = element
                 dictArchetype.update(dictDBBuildings[archetype])
                 break
-        
+
         dictScada = dfSolarArch.sort_values(by='Median_Radiation',
                                             ascending=False)
-        
         areaAvailable = x06EstablishValue(dictArchetype,
                                           'area_total',
                                           0,
@@ -698,8 +708,17 @@ def s05RetrieveSolarData(nutsId: str,
             nuts2, potDistrib, areasDistrib = x10GetDistribution(rows=rows,
                                                                  label='production')
 
-    # Save results in temporary directory
-    prodAgreggated.index=pd.to_datetime(prodAgreggated.index).round('h').strftime('%d/%m/%Y %H:%M')
+    # Save results in temporary directory, checking is the DataFrame is empty, or contains NaN values
+    if prodAgreggated.empty:
+        prodAgreggated = pd.DataFrame(0.0,
+                                      index=pd.Index(dfTemperatures['time']),
+                                      columns=prodAgreggated.columns.to_list())
+        prodAgreggated.index.name = 'time'
+        for archetype in constants.BUILDING_USES:
+            prodAgreggated[archetype] = prodAgreggated.get(archetype, 0.0)
+    else:
+        prodAgreggated = prodAgreggated.fillna(0.0)
+        prodAgreggated.index=pd.to_datetime(prodAgreggated.index).round('h').strftime('%d/%m/%Y %H:%M')
     csvPath = Path(__file__).parent.parent / \
         'temporary' / f'{nutsId.upper()}_solar_results.csv'
     prodAgreggated.to_csv(csvPath,
@@ -853,12 +872,12 @@ def s06AddColumnsToMainDataFrame(dfCSV: pd.DataFrame) -> pd.DataFrame:
                                              'EP. Solar (SH)', 'EP. Electric space cooling (SH)', 'EP. Electricity (SH)',
                                              'EP. Solids (SC)', 'EP. LPG (SC)', 'EP. Diesel oil (SC)', 'EP. Gas heat pumps (SC)', 'EP. Natural gas (SC)',
                                              'EP. Biomass (SC)', 'EP. Geothermal (SC)', 'EP. Distributed heat (SC)', 'EP. Advanced electric heating (SC)',
-                                             'EP. Conventional electric heating (SC)', 'EP. BioOil (SC)', 'EP. BioGas (SH)', 'EP. Hydrogen (SC)',
+                                             'EP. Conventional electric heating (SC)', 'EP. BioOil (SC)', 'EP. BioGas (SC)', 'EP. Hydrogen (SC)',
                                              'EP. Solar (SC)', 'EP. Electric space cooling (SC)', 'EP. Electricity (SC)',
                                              'EP. Solids (WH)', 'EP. LPG (WH)', 'EP. Diesel oil (WH)', 'EP. Gas heat pumps (WH)', 'EP. Natural gas (WH)',
                                              'EP. Biomass (WH)', 'EP. Geothermal (WH)', 'EP. Distributed heat (WH)', 'EP. Advanced electric heating (WH)',
                                              'EP. Conventional electric heating (WH)', 'EP. BioOil (WH)', 'EP. BioGas (WH)', 'EP. Hydrogen (WH)',
-                                             'EP. Solar (WH)', 'EP. Electric space cooling (WH)', 'EP. Electricity (WHSH)'])],
+                                             'EP. Solar (WH)', 'EP. Electric space cooling (WH)', 'EP. Electricity (WH)'])],
                       axis=1)
 
     # Finish
@@ -1114,571 +1133,376 @@ def s08AddActiveMeasures(dfCSV: pd.DataFrame,
                 measure['appliances']['electricity']
             ]
         else:
+            # dfCSV['SH. Natural gas']=dfCSV.apply(
+            #         lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+            #                                == 'Space heating_Natural gas'].values[0][2]
+            #         if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+            #         else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Natural gas'].values[0][2]
+            #               if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+            #               else row['SH. Natural gas']), axis=1)
             dfCSV = dfCSV.assign(
-                # Space heating (for Residential and Service sectors)
-                space_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Space heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Space heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Space heating']), axis=1),
-                sh_solids=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Solids'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Solids'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Solids']), axis=1),
-                sh_lpg=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Space heating_Liquified petroleum gas (LPG)'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Liquified petroleum gas (LPG)'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. LPG']), axis=1),
-                sh_diesel_oil=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Diesel oil'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Diesel oil'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Diesel oil']), axis=1),
-                sh_gas_heat_pumps=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Gas heat pumps'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Gas heat pumps'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Gas heat pumps']), axis=1),
-                sh_natural_gas=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Natural gas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Natural gas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Natural gas']), axis=1),
-                sh_biomass=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Biomass'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Biomass'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Biomass']), axis=1),
-                sh_geothermal=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Geothermal'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Geothermal'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Geothermal']), axis=1),
-                sh_distributed_heat=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Distributed heat'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Distributed heat'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Distributed heat']), axis=1),
-                sh_advanced_electric_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Space heating_Advanced electric heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Advanced electric heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Advanced electric heating']), axis=1),
-                sh_conventional_electric_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Space heating_Conventional electric heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Conventional electric heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Conventional electric heating']), axis=1),
-                sh_bio_oil=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_BioOil'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_BioOil'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. BioOil']), axis=1),
-                sh_bio_gas=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_BioGas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_BioGas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. BioGas']), axis=1),
-                sh_hydrogen=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Hydrogen'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Hydrogen'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Hydrogen']), axis=1),
-                sh_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Solar']), axis=1),
-                sh_electricity_in_circulation=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Electricity in circulation'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Electricity in circulation'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Electricity in circulation']), axis=1),
-                sh_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Electric space cooling']), axis=1),
-                sh_electricity=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Electricity']), axis=1),
-                # Space cooling (for Residential and Service sectors)
-                space_cooling=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Space cooling'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Space cooling'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Space cooling']), axis=1),
-                sc_solids=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Solids']), axis=1),
-                sc_lpg=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. LPG']), axis=1),
-                sc_diesel_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Diesel oil']), axis=1),
-                sc_gas_heat_pumps=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space cooling_Gas heat pumps'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space cooling_Gas heat pumps'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Gas heat pumps']), axis=1),
-                sc_natural_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Natural gas']), axis=1),
-                sc_biomass=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Biomass']), axis=1),
-                sc_geothermal=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Geothermal']), axis=1),
-                sc_distributed_heat=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Distributed heat']), axis=1),
-                sc_advanced_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Advanced electric heating']), axis=1),
-                sc_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Conventional electric heating']), axis=1),
-                sc_bio_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. BioOil']), axis=1),
-                sc_bio_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. BioGas']), axis=1),
-                sc_hydrogen=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Hydrogen']), axis=1),
-                sc_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Solar']), axis=1),
-                sc_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Electricity in circulation']), axis=1),
-                sc_electric_space_cooling=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space cooling_Electric space cooling'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space cooling_Electric space cooling'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Electric space cooling']), axis=1),
-                sc_electricity=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Electricity']), axis=1),
-                # Water heating (for Residential and Service sectors)
-                water_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Water heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Water heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Water heating']), axis=1),
-                wh_solids=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Solids'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Solids'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Solids']), axis=1),
-                wh_lpg=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Water heating_Liquified petroleum gas (LPG)'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Liquified petroleum gas (LPG)'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. LPG']), axis=1),
-                wh_diesel_oil=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Diesel oil'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Diesel oil'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Diesel oil']), axis=1),
-                wh_gas_heat_pumps=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Gas heat pumps']), axis=1),
-                wh_natural_gas=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Natural gas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Natural gas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Natural gas']), axis=1),
-                wh_biomass=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Biomass'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Biomass'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Biomass']), axis=1),
-                wh_geothermal=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Geothermal'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Geothermal'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Geothermal']), axis=1),
-                wh_distributed_heat=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Distributed heat'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Distributed heat'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Distributed heat']), axis=1),
-                wh_advanced_electric_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Water heating_Advanced electric heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Advanced electric heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Advanced electric heating']), axis=1),
-                wh_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Conventional electric heating']), axis=1),
-                wh_bio_oil=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_BioOil'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_BioOil'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. BioOil']), axis=1),
-                wh_bio_gas=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_BioGas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_BioGas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. BioGas']), axis=1),
-                wh_hydrogen=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Hydrogen'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Hydrogen'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Hydrogen']), axis=1),
-                wh_solar=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Solar'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Solar'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Solar']), axis=1),
-                wh_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Electric space cooling']), axis=1),
-                wh_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Electric space cooling']), axis=1),
-                wh_electricity=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Electricity'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Electricity'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Electricity']), axis=1),
-                # Cooking (for Residential and Service sectors)
-                cooking=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Cooking'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Cooking'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Cooking']), axis=1),
-                c_solids=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Solids'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Solids'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Solids']), axis=1),
-                c_lpg=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Liquified petroleum gas (LPG)'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Liquified petroleum gas (LPG)'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. LPG']), axis=1),
-                c_diesel_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Diesel oil']), axis=1),
-                c_gas_heat_pumps=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Gas heat pumps']), axis=1),
-                c_natural_gass=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Natural gas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Natural gas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Natural gas']), axis=1),
-                c_biomass=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Biomass'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Biomass'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Biomass']), axis=1),
-                c_geothermal=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Geothermal']), axis=1),
-                c_distributed_heat=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Distributed heat']), axis=1),
-                c_advanced_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Advanced electric heating']), axis=1),
-                c_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Conventional electric heating']), axis=1),
-                c_bio_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. BioOil']), axis=1),
-                c_bio_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. BioGas']), axis=1),
-                c_hydrogen=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Hydrogen']), axis=1),
-                c_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Solar']), axis=1),
-                c_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Electricity in circulation']), axis=1),
-                c_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Electric space cooling']), axis=1),
-                c_electricity=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Electricity'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Electricity'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Electricity']), axis=1),
-                # Lighting (for Residential and Service sectors)
-                lighting=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Lighting'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Lighting'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Lighting']), axis=1),
-                l_solids=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Solids']), axis=1),
-                l_lpg=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. LPG']), axis=1),
-                l_diesel_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Diesel oil']), axis=1),
-                l_gas_heat_pumps=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Gas heat pumps']), axis=1),
-                l_natural_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Natural gas']), axis=1),
-                l_biomass=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Biomass']), axis=1),
-                l_geothermal=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Geothermal']), axis=1),
-                l_distributed_heat=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Distributed heat']), axis=1),
-                l_advanced_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Advanced electric heating']), axis=1),
-                l_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Conventional electric heating']), axis=1),
-                l_bio_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. BioOil']), axis=1),
-                l_bio_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. BioGas']), axis=1),
-                l_hydrogen=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Hydrogen']), axis=1),
-                l_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Solar']), axis=1),
-                l_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Electricity in circulation']), axis=1),
-                l_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Electric space cooling']), axis=1),
-                l_electricity=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Lighting_Electricity'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Lighting_Electricity'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Electricity']), axis=1),
-                # Appliances (for Residential and Service sectors)
-                appliances=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Appliances'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Appliances'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Appliances']), axis=1),
-                a_solids=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Solids']), axis=1),
-                a_lpg=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. LPG']), axis=1),
-                a_diesel_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['a. Diesel oil']), axis=1),
-                a_gas_heat_pumps=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Gas heat pumps']), axis=1),
-                a_natural_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Natural gas']), axis=1),
-                a_biomass=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Biomass']), axis=1),
-                a_geothermal=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Geothermal']), axis=1),
-                a_distributed_heat=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Distributed heat']), axis=1),
-                a_advanced_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Advanced electric heating']), axis=1),
-                a_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Conventional electric heating']), axis=1),
-                a_bio_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. BioOil']), axis=1),
-                a_bio_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. BioGas']), axis=1),
-                a_hydrogen=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Hydrogen']), axis=1),
-                a_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Solar']), axis=1),
-                a_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Electricity in circulation']), axis=1),
-                a_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Electric space cooling']), axis=1),
-                a_electricity=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Lighting_Electricity'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Lighting_Electricity'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Electricity']), axis=1)
+                **{
+                    # Space heating (for Residential and Service sectors)
+                    'Space heating': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == '_Space heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Space heating'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['Space heating']), axis=1),
+                    'SH. Solids': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_Solids'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Solids'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Solids']), axis=1),
+                    'SH. LPG': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                            'Space heating_Liquified petroleum gas (LPG)'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Liquified petroleum gas (LPG)'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. LPG']), axis=1),
+                    'SH. Diesel oil': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_Diesel oil'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Diesel oil'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Diesel oil']), axis=1),
+                    'SH. Gas heat pumps': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_Gas heat pumps'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Gas heat pumps'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Gas heat pumps']), axis=1),
+                    'SH. Natural gas': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_Natural gas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Natural gas'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Natural gas']), axis=1),
+                    'SH. Biomass': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_Biomass'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Biomass'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Biomass']), axis=1),
+                    'SH. Geothermal': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_Geothermal'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Geothermal'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Geothermal']), axis=1),
+                    'SH. Distributed heat': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_Distributed heat'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Distributed heat'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Distributed heat']), axis=1),
+                    'SH. Advanced electric heating': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                            'Space heating_Advanced electric heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Advanced electric heating'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Advanced electric heating']), axis=1),
+                    'SH. Conventional electric heating': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                            'Space heating_Conventional electric heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Conventional electric heating'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Conventional electric heating']), axis=1),
+                    'SH. BioOil': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_BioOil'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_BioOil'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. BioOil']), axis=1),
+                    'SH. BioGas': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_BioGas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_BioGas'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. BioGas']), axis=1),
+                    'SH. Hydrogen': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_Hydrogen'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Hydrogen'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Hydrogen']), axis=1),
+                    'SH. Solar': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SH. Electricity in circulation': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space heating_Electricity in circulation'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Electricity in circulation'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SH. Electricity in circulation']), axis=1),
+                    'SH. Electric space cooling': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SH. Electricity': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    # Space cooling (for Residential and Service sectors)
+                    'Space cooling': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == '_Space cooling'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Space cooling'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['Space cooling']), axis=1),
+                    'SC. Solids': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. LPG': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Diesel oil': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Gas heat pumps': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space cooling_Gas heat pumps'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space cooling_Gas heat pumps'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SC. Gas heat pumps']), axis=1),
+                    'SC. Natural gas': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Biomass': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Geothermal': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Distributed heat': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Advanced electric heating': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Conventional electric heating': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. BioOil': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. BioGas': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Hydrogen': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Solar': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Electricity in circulation': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Electric space cooling': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Space cooling_Electric space cooling'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space cooling_Electric space cooling'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['SC. Electric space cooling']), axis=1),
+                    'SC. Electricity': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    # Water heating (for Residential and Service sectors)
+                    'Water heating': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == '_Water heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Water heating'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['Water heating']), axis=1),
+                    'WH. Solids': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_Solids'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Solids'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. Solids']), axis=1),
+                    'WH. LPG': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                            'Water heating_Liquified petroleum gas (LPG)'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Liquified petroleum gas (LPG)'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. LPG']), axis=1),
+                    'WH. Diesel oil': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_Diesel oil'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Diesel oil'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. Diesel oil']), axis=1),
+                    'WH. Gas heat pumps': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'WH. Natural gas': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_Natural gas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Natural gas'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. Natural gas']), axis=1),
+                    'WH. Biomass': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_Biomass'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Biomass'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. Biomass']), axis=1),
+                    'WH. Geothermal': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_Geothermal'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Geothermal'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. Geothermal']), axis=1),
+                    'WH. Distributed heat': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_Distributed heat'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Distributed heat'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. Distributed heat']), axis=1),
+                    'WH. Advanced electric heating': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                            'Water heating_Advanced electric heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Advanced electric heating'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. Advanced electric heating']), axis=1),
+                    'WH. Conventional electric heating': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'WH. BioOil': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_BioOil'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_BioOil'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. BioOil']), axis=1),
+                    'WH. BioGas': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_BioGas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_BioGas'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. BioGas']), axis=1),
+                    'WH. Hydrogen': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_Hydrogen'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Hydrogen'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. Hydrogen']), axis=1),
+                    'WH. Solar': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Water heating_Solar'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Solar'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['WH. Solar']), axis=1),
+                    'WH. Electricity in circulation': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'WH. Electric space cooling': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'WH. Electricity': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    # Cooking (for Residential and Service sectors)
+                    'Cooking': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == '_Cooking'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Cooking'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['Cooking']), axis=1),
+                    'C. Solids': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Cooking_Solids'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Solids'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['C. Solids']), axis=1),
+                    'C. LPG': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Cooking_Liquified petroleum gas (LPG)'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Liquified petroleum gas (LPG)'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['C. LPG']), axis=1),
+                    'C. Diesel oil': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Gas heat pumps': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Natural gas': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Cooking_Natural gas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Natural gas'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['C. Natural gas']), axis=1),
+                    'C. Biomass': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Cooking_Biomass'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Biomass'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['C. Biomass']), axis=1),
+                    'C. Geothermal': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Distributed heat': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Advanced electric heating': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Conventional electric heating': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. BioOil': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. BioGas': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Hydrogen': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Solar': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Electricity in circulation': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Electric space cooling': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Electricity': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Cooking_Electricity'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Electricity'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['C. Electricity']), axis=1),
+                    # Lighting (for Residential and Service sectors)
+                    'Lighting': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == '_Lighting'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Lighting'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['Lighting']), axis=1),
+                    'L. Solids': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. LPG': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Diesel oil': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Gas heat pumps': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Natural gas': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Biomass': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Geothermal': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Distributed heat': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Advanced electric heating': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Conventional electric heating': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. BioOil': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. BioGas': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Hydrogen': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Solar': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Electricity in circulation': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Electric space cooling': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Electricity': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Lighting_Electricity'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Lighting_Electricity'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['L. Electricity']), axis=1),
+                    # Appliances (for Residential and Service sectors)
+                    'Appliances': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == '_Appliances'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Appliances'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['Appliances']), axis=1),
+                    'A. Solids': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. LPG': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Diesel oil': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Gas heat pumps': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Natural gas': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Biomass': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Geothermal': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Distributed heat': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Advanced electric heating': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Conventional electric heating': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. BioOil': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. BioGas': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Hydrogen': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Solar': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Electricity in circulation': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Electric space cooling': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Electricity': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Lighting_Electricity'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Lighting_Electricity'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['L. Electricity']), axis=1)
+                }
             )
 
     print('Model: Step 08/>  Writing the Active measures (baseline)...')
@@ -1760,570 +1584,371 @@ def s08AddActiveMeasures(dfCSV: pd.DataFrame,
             ]
         else:
             dfCSV = dfCSV.assign(
-                # Space heating (for Residential and Service sectors)
-                space_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Space heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Space heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Space heating base']), axis=1),
-                sh_solids=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Solids'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Solids'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Solids base base']), axis=1),
-                sh_lpg=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Space heating_Liquified petroleum gas (LPG)'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Liquified petroleum gas (LPG)'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. LPG base']), axis=1),
-                sh_diesel_oil=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Diesel oil'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Diesel oil'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Diesel oil base']), axis=1),
-                sh_gas_heat_pumps=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Gas heat pumps'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Gas heat pumps'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Gas heat pumps base']), axis=1),
-                sh_natural_gas=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Natural gas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Natural gas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Natural gas base']), axis=1),
-                sh_biomass=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Biomass'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Biomass'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Biomass base']), axis=1),
-                sh_geothermal=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Geothermal'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Geothermal'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Geothermal base']), axis=1),
-                sh_distributed_heat=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Distributed heat'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Distributed heat'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Distributed heat base']), axis=1),
-                sh_advanced_electric_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Space heating_Advanced electric heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Advanced electric heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Advanced electric heating base']), axis=1),
-                sh_conventional_electric_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Space heating_Conventional electric heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Conventional electric heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Conventional electric heating base']), axis=1),
-                sh_bio_oil=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_BioOil'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_BioOil'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. BioOil base']), axis=1),
-                sh_bio_gas=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_BioGas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_BioGas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. BioGas base']), axis=1),
-                sh_hydrogen=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space heating_Hydrogen'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Hydrogen'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Hydrogen base']), axis=1),
-                sh_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Solar base']), axis=1),
-                sh_electricity_in_circulation=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Electricity in circulation'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Electricity in circulation'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Electricity in circulation base']), axis=1),
-                sh_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Electric space cooling base']), axis=1),
-                sh_electricity=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SH. Electricity base']), axis=1),
-                # Space cooling (for Residential and Service sectors)
-                space_cooling=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Space cooling'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Space cooling'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Space cooling base']), axis=1),
-                sc_solids=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Solids base']), axis=1),
-                sc_lpg=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. LPG base']), axis=1),
-                sc_diesel_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Diesel oil base']), axis=1),
-                sc_gas_heat_pumps=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space cooling_Gas heat pumps'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space cooling_Gas heat pumps'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Gas heat pumps base']), axis=1),
-                sc_natural_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Natural gas base']), axis=1),
-                sc_biomass=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Biomass base']), axis=1),
-                sc_geothermal=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Geothermal base']), axis=1),
-                sc_distributed_heat=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Distributed heat base']), axis=1),
-                sc_advanced_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Advanced electric heating base']), axis=1),
-                sc_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Conventional electric heating base']), axis=1),
-                sc_bio_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. BioOil base']), axis=1),
-                sc_bio_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. BioGas base']), axis=1),
-                sc_hydrogen=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Hydrogen base']), axis=1),
-                sc_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Solar base']), axis=1),
-                sc_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Electricity in circulation base']), axis=1),
-                sc_electric_space_cooling=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Space cooling_Electric space cooling'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space cooling_Electric space cooling'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Electric space cooling base']), axis=1),
-                sc_electricity=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['SC. Electricity base']), axis=1),
-                # Water heating (for Residential and Service sectors)
-                water_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Water heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Water heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Water heating base']), axis=1),
-                wh_solids=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Solids'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Solids'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Solids base']), axis=1),
-                wh_lpg=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Water heating_Liquified petroleum gas (LPG)'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Liquified petroleum gas (LPG)'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. LPG base']), axis=1),
-                wh_diesel_oil=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Diesel oil'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Diesel oil'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Diesel oil base']), axis=1),
-                wh_gas_heat_pumps=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Gas heat pumps base']), axis=1),
-                wh_natural_gas=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Natural gas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Natural gas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Natural gas base']), axis=1),
-                wh_biomass=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Biomass'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Biomass'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Biomass base']), axis=1),
-                wh_geothermal=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Geothermal'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Geothermal'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Geothermal base']), axis=1),
-                wh_distributed_heat=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Distributed heat'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Distributed heat'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Distributed heat base']), axis=1),
-                wh_advanced_electric_heating=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
-                                           'Water heating_Advanced electric heating'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Advanced electric heating'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Advanced electric heating base']), axis=1),
-                wh_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Conventional electric heating base']), axis=1),
-                wh_bio_oil=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_BioOil'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_BioOil'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. BioOil base']), axis=1),
-                wh_bio_gas=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_BioGas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_BioGas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. BioGas base']), axis=1),
-                wh_hydrogen=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Hydrogen'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Hydrogen'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Hydrogen base']), axis=1),
-                wh_solar=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Solar'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Solar'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Solar base']), axis=1),
-                wh_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Electric space cooling base']), axis=1),
-                wh_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Electric space cooling base']), axis=1),
-                wh_electricity=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Water heating_Electricity'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Electricity'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['WH. Electricity base']), axis=1),
-                # Cooking (for Residential and Service sectors)
-                cooking=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Cooking'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Cooking'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Cooking base']), axis=1),
-                c_solids=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Solids'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Solids'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Solids base']), axis=1),
-                c_lpg=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Liquified petroleum gas (LPG)'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Liquified petroleum gas (LPG)'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. LPG base']), axis=1),
-                c_diesel_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Diesel oil base']), axis=1),
-                c_gas_heat_pumps=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Gas heat pumps base']), axis=1),
-                c_natural_gass=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Natural gas'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Natural gas'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Natural gas base']), axis=1),
-                c_biomass=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Biomass'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Biomass'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Biomass base']), axis=1),
-                c_geothermal=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Geothermal base']), axis=1),
-                c_distributed_heat=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Distributed heat base']), axis=1),
-                c_advanced_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Advanced electric heating base']), axis=1),
-                c_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Conventional electric heating base']), axis=1),
-                c_bio_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. BioOil base']), axis=1),
-                c_bio_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. BioGas base']), axis=1),
-                c_hydrogen=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Hydrogen base']), axis=1),
-                c_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Solar base']), axis=1),
-                c_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Electricity in circulation base']), axis=1),
-                c_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Electric space cooling base']), axis=1),
-                c_electricity=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Cooking_Electricity'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Electricity'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['C. Electricity base']), axis=1),
-                # Lighting (for Residential and Service sectors)
-                lighting=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Lighting'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Lighting'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Lighting base']), axis=1),
-                l_solids=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Solids base']), axis=1),
-                l_lpg=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. LPG base']), axis=1),
-                l_diesel_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Diesel oil base']), axis=1),
-                l_gas_heat_pumps=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Gas heat pumps base']), axis=1),
-                l_natural_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Natural gas base']), axis=1),
-                l_biomass=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Biomass base']), axis=1),
-                l_geothermal=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Geothermal base']), axis=1),
-                l_distributed_heat=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Distributed heat base']), axis=1),
-                l_advanced_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Advanced electric heating base']), axis=1),
-                l_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Conventional electric heating base']), axis=1),
-                l_bio_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. BioOil base']), axis=1),
-                l_bio_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. BioGas base']), axis=1),
-                l_hydrogen=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Hydrogen base']), axis=1),
-                l_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Solar base']), axis=1),
-                l_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Electricity in circulation base']), axis=1),
-                l_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Electric space cooling base']), axis=1),
-                l_electricity=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Lighting_Electricity'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Lighting_Electricity'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Electricity base']), axis=1),
-                # Appliances (for Residential and Service sectors)
-                appliances=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == '_Appliances'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Appliances'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['Appliances base']), axis=1),
-                a_solids=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Solids base']), axis=1),
-                a_lpg=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. LPG base']), axis=1),
-                a_diesel_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['a. Diesel oil base']), axis=1),
-                a_gas_heat_pumps=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Gas heat pumps base']), axis=1),
-                a_natural_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Natural gas base']), axis=1),
-                a_biomass=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Biomass base']), axis=1),
-                a_geothermal=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Geothermal base']), axis=1),
-                a_distributed_heat=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Distributed heat base']), axis=1),
-                a_advanced_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Advanced electric heating base']), axis=1),
-                a_conventional_electric_heating=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Conventional electric heating base']), axis=1),
-                a_bio_oil=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. BioOil base']), axis=1),
-                a_bio_gas=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. BioGas base']), axis=1),
-                a_hydrogen=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Hydrogen base']), axis=1),
-                a_solar=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Solar base']), axis=1),
-                a_electricity_in_circulation=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Electricity in circulation base']), axis=1),
-                a_electric_space_cooling=dfCSV.apply(
-                    lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['A. Electric space cooling base']), axis=1),
-                a_electricity=dfCSV.apply(
-                    lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-                                           == 'Lighting_Electricity'].values[0][2]
-                    if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-                    else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Lighting_Electricity'].values[0][2]
-                          if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-                          else row['L. Electricity base']), axis=1)
+                **{
+                    # Space heating (for Residential and Service sectors)
+                    'Space heating base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == '_Space heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Space heating'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['Space heating base']), axis=1),
+                    'SH. Solids base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_Solids'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Solids'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Solids base']), axis=1),
+                    'SH. LPG base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                               'Space heating_Liquified petroleum gas (LPG)'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Liquified petroleum gas (LPG)'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. LPG base']), axis=1),
+                    'SH. Diesel oil base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_Diesel oil'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Diesel oil'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Diesel oil base']), axis=1),
+                    'SH. Gas heat pumps base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_Gas heat pumps'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Gas heat pumps'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Gas heat pumps base']), axis=1),
+                    'SH. Natural gas base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_Natural gas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Natural gas'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Natural gas base']), axis=1),
+                    'SH. Biomass base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_Biomass'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Biomass'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Biomass base']), axis=1),
+                    'SH. Geothermal base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_Geothermal'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Geothermal'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Geothermal base']), axis=1),
+                    'SH. Distributed heat base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_Distributed heat'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Distributed heat'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Distributed heat base']), axis=1),
+                    'SH. Advanced electric heating base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                               'Space heating_Advanced electric heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Advanced electric heating'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Advanced electric heating base']), axis=1),
+                    'SH. Conventional electric heating base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                               'Space heating_Conventional electric heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Conventional electric heating'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Conventional electric heating base']), axis=1),
+                    'SH. BioOil base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_BioOil'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_BioOil'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. BioOil base']), axis=1),
+                    'SH. BioGas base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_BioGas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_BioGas'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. BioGas base']), axis=1),
+                    'SH. Hydrogen base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_Hydrogen'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Hydrogen'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Hydrogen base']), axis=1),
+                    'SH. Solar base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SH. Electricity in circulation base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space heating_Electricity in circulation'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Electricity in circulation'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SH. Electricity in circulation base']), axis=1),
+                    'SH. Electric space cooling base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SH. Electricity base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    # Space cooling (for Residential and Service sectors)
+                    'Space cooling base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == '_Space cooling'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Space cooling'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['Space cooling base']), axis=1),
+                    'SC. Solids base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. LPG base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Diesel oil base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Gas heat pumps base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Space cooling_Gas heat pumps'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space cooling_Gas heat pumps'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SC. Gas heat pumps base']), axis=1),
+                    'SC. Natural gas base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Biomass base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Geothermal base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Distributed heat base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Advanced electric heating base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Conventional electric heating base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. BioOil base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. BioGas base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Hydrogen base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Solar base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Electricity in circulation base': dfCSV.apply(
+                        lambda row: 0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (0.0 if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['SC. Electricity in circulation base']), axis=1),
+                    'SC. Electric space cooling base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'SC. Electricity base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    # Water heating (for Residential and Service sectors)
+                    'Water heating base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == '_Water heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Water heating'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['Water heating base']), axis=1),
+                    'WH. Solids base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_Solids'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Solids'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Solids base']), axis=1),
+                    'WH. LPG base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                               'Water heating_Liquified petroleum gas (LPG)'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Liquified petroleum gas (LPG)'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. LPG base']), axis=1),
+                    'WH. Diesel oil base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_Diesel oil'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Diesel oil'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Diesel oil base']), axis=1),
+                    # 'WH. Gas heat pumps base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'WH. Natural gas base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_Natural gas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Natural gas'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Natural gas base']), axis=1),
+                    'WH. Biomass base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_Biomass'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Biomass'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Biomass base']), axis=1),
+                    'WH. Geothermal base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_Geothermal'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Geothermal'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Geothermal base']), axis=1),
+                    'WH. Distributed heat base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_Distributed heat'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Distributed heat'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Distributed heat base']), axis=1),
+                    'WH. Advanced electric heating base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel'] ==
+                                               'Water heating_Advanced electric heating'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Advanced electric heating'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Advanced electric heating base']), axis=1),
+                    'WH. Conventional electric heating base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'WH. BioOil base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_BioOil'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_BioOil'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. BioOil base']), axis=1),
+                    'WH. BioGas base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_BioGas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_BioGas'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. BioGas base']), axis=1),
+                    'WH. Hydrogen base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_Hydrogen'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Hydrogen'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Hydrogen base']), axis=1),
+                    'WH. Solar base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_Solar'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Solar'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Solar base']), axis=1),
+                    'WH. Electricity in circulation base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'WH. Electric space cooling base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'WH. Electricity base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Water heating_Electricity'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Water heating_Electricity'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['WH. Electricity base']), axis=1),
+                    # Cooking (for Residential and Service sectors)
+                    'Cooking base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == '_Cooking'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Cooking'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['Cooking base']), axis=1),
+                    'C. Solids base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Cooking_Solids'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Solids'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['C. Solids base']), axis=1),
+                    'C. LPG base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Cooking_Liquified petroleum gas (LPG)'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Liquified petroleum gas (LPG)'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['C. LPG base']), axis=1),
+                    'C. Diesel oil base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Gas heat pumps base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Natural gas base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Cooking_Natural gas'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Natural gas'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['C. Natural gas base']), axis=1),
+                    'C. Biomass base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Cooking_Biomass'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Biomass'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['C. Biomass base']), axis=1),
+                    'C. Geothermal base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Distributed heat base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Advanced electric heating base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Conventional electric heating base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. BioOil base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. BioGas base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Hydrogen base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Solar base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Electricity in circulation base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Electric space cooling base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'C. Electricity base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Cooking_Electricity'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Cooking_Electricity'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['C. Electricity base']), axis=1),
+                    # Lighting (for Residential and Service sectors)
+                    'Lighting base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == '_Lighting'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Lighting'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['Lighting base']), axis=1),
+                    'L. Solids base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. LPG base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Diesel oil base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Gas heat pumps base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Natural gas base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Biomass base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Geothermal base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Distributed heat base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Advanced electric heating base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Conventional electric heating base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. BioOil base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. BioGas base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Hydrogen base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Solar base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Electricity in circulation base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Electric space cooling base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'L. Electricity base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == 'Lighting_Electricity'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Lighting_Electricity'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['L. Electricity base']), axis=1),
+                    # Appliances (for Residential and Service sectors)
+                    'Appliances base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                               == '_Appliances'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == '_Appliances'].values[0][2]
+                              if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                              else row['Appliances base']), axis=1),
+                    'A. Solids base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. LPG base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Diesel oil base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Gas heat pumps base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Natural gas base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Biomass base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Geothermal base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Distributed heat base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Advanced electric heating base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Conventional electric heating base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. BioOil base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. BioGas base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Hydrogen base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Solar base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Electricity in circulation base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Electric space cooling base': dfCSV.apply(lambda row: 0.0 , axis=1),
+                    'A. Electricity base': dfCSV.apply(
+                        lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
+                                            == 'Lighting_Electricity'].values[0][2]
+                        if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
+                        else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Lighting_Electricity'].values[0][2]
+                            if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
+                            else row['A. Electricity base']), axis=1)
+                }
             )
 
     # Energy services (dfRThheff)
@@ -2370,10 +1995,9 @@ def s08AddActiveMeasures(dfCSV: pd.DataFrame,
         dfCSV.loc[dfCSV['Use'] == arch, 'Eff. SH. Hydrogen'] =\
             dfRThheff[dfRThheff['Energy service_Fuel']
                       == 'Space heating_Hydrogen'].values[0][2]
-        # Electricity in circulation
         dfCSV.loc[dfCSV['Use'] == arch, 'Eff. EIC'] =\
             dfRThheff[dfRThheff['Energy service_Fuel'] ==
-                      '_Electricity in circulation'].values[0][2]
+                      'Space heating_Electricity in circulation'].values[0][2]
         # Space cooling
         dfCSV.loc[dfCSV['Use'] == arch, 'Eff. SC'] = dfRThheff[dfRThheff['Energy service_Fuel']
                                                                == '_Space cooling'].values[0][2]
@@ -3358,7 +2982,7 @@ def s18CalculateGeneralSchedule(dfCSV: pd.DataFrame,
                                 dfBaseTemperatures: pd.DataFrame,
                                 dfSolarOffice: pd.DataFrame,
                                 dfSolarNOffice: pd.DataFrame,
-                                nutsId: str) -> dict:
+                                nutsId: str) -> tuple:
     """Model Step 18: Calculate the General Schedule for each archetype.
 
     Args:
@@ -3374,7 +2998,7 @@ def s18CalculateGeneralSchedule(dfCSV: pd.DataFrame,
             analysis will be carried out.
     
     Returns:
-        dict
+        tuple
 
     """
 
@@ -3513,34 +3137,60 @@ def s18CalculateGeneralSchedule(dfCSV: pd.DataFrame,
 
     print('Model: Step 18/>  Building the final schedule...')
     dictSchedule = {}
+    archetypesFlags = [False, False, False, False, False, False, False, False, False]
     for index, row in dfCSV.iterrows():
         schedule = None
-        if row['Use'] == 'Apartment Block':
+        # Apartment Block
+        if row['Use'] == constants.BUILDING_USES[0]:
+            archetypesFlags[0] = True
             schedule = dfGenSchedApartmentBlock
-        elif row['Use'] == 'Single family- Terraced houses':
+        # Single family- Terraced houses
+        elif row['Use'] == constants.BUILDING_USES[1]:
+            archetypesFlags[1] = True
             schedule = dfGenSchedSingleFamily
-        elif row['Use'] == 'Hotels and Restaurants':
+        # Hotels and Restaurants
+        elif row['Use'] == constants.BUILDING_USES[2]:
+            archetypesFlags[2] = True
             schedule = dfGenSchedHotels
-        elif row['Use'] == 'Health':
+        # Health
+        elif row['Use'] == constants.BUILDING_USES[3]:
+            archetypesFlags[3] = True
             schedule = dfGenSchedHealth
-        elif row['Use'] == 'Education':
+        # Education
+        elif row['Use'] == constants.BUILDING_USES[4]:
+            archetypesFlags[4] = True
             schedule = dfGenSchedEducation
-        elif row['Use'] == 'Offices':
+        # Offices
+        elif row['Use'] == constants.BUILDING_USES[5]:
+            archetypesFlags[5] = True
             schedule = dfGenSchedOffices
-        elif row['Use'] == 'Trade':
+        # Trade
+        elif row['Use'] == constants.BUILDING_USES[6]:
+            archetypesFlags[6] = True
             schedule = dfGenSchedTrade
-        elif row['Use'] == 'Other non-residential buildings':
+        # Other non-residential buildings
+        elif row['Use'] == constants.BUILDING_USES[7]:
+            archetypesFlags[7] = True
             schedule = dfGenSchedOther
-        elif row['Use'] == 'Sport':
+        # Sport
+        elif row['Use'] == constants.BUILDING_USES[8]:
+            archetypesFlags[8] = True
             schedule = dfGenSchedSport
+        
         dictSchedule[row['Building ID']] = {
             'use': row['Use'],
             'schedule': schedule
         }
+    
+    # Adjust the "not found" building uses
+    archetypesNotFound = []
+    for i in range(len(archetypesFlags)):
+        if not archetypesFlags[i]:
+            archetypesNotFound.append(constants.BUILDING_USES[i])
 
     # Finish
     print('Model: Step 18/>  [OK]')
-    return dictSchedule
+    return dictSchedule, archetypesNotFound
 
 
 # Function: Build. Energy Sim. -> Model -> Step 19 -> Calculate the Scenario
@@ -4035,7 +3685,7 @@ def s20CalculateAnualResults(dfCSV: pd.DataFrame,
                                                   'WH. Cost Hydrogen', 'WH. Cost Solar', 'WH. Cost Electric space cooling', 'WH. Cost Electricity'])
 
     # Save to Excel (if allowed)
-    if constants.SAVE_RESULT_ALLOWED:
+    if constants.SAVE_RESULT_TO_EXCEL_ALLOWED:
         with pd.ExcelWriter('temporary/result.xlsx') as writer:
             dfAnualResults.to_excel(
                 writer, sheet_name='Anual Results', index=False)
@@ -4100,7 +3750,8 @@ def s21CalculateConsolidate(dictSchedule: dict,
             if not 'Datetime' in dfConsolidated:
                 dfConsolidated.insert(
                     0, 'Datetime', dictValue['schedule']['Datetime'])
-                dfConsolidated.insert(0, 'Building Type', dictValue['use'])
+                dfConsolidated.insert(
+                    0, 'Building Type', dictValue['use'])
                 dfConsolidated.iloc[:, 2:] = 0.0
 
             # Space heating
@@ -4149,11 +3800,11 @@ def s21CalculateConsolidate(dictSchedule: dict,
             dfConsolidated['Electricity (Cooking)'] += dictValue['schedule']['FC-Cooking (Electricity)-Electricity']
 
     # Save to Excel (if allowed)
-    if constants.SAVE_RESULT_ALLOWED:
-        with pd.ExcelWriter('temporary/result.xlsx', mode='a') as writer:
-            dfConsolidated.to_excel(writer,
-                                    sheet_name='Consolidated (' + archetype[:4] + '.)',
-                                    index=False)
+    # if constants.SAVE_RESULT_TO_EXCEL_ALLOWED:
+    #     with pd.ExcelWriter('temporary/result.xlsx', mode='a') as writer:
+    #         dfConsolidated.to_excel(writer,
+    #                                 sheet_name='Consolidated (' + archetype[:4] + '.)',
+    #                                 index=False)
 
     # Finish
     print('Model: Step 21/>  [OK]')
@@ -4301,7 +3952,7 @@ def s22CalculateHourlyResults(dfCSV: pd.DataFrame,
                 (heatSolar * csv['OPEX Emissions Heat|Solar']))
 
     # Save to Excel (if allowed)
-    if constants.SAVE_RESULT_ALLOWED:
+    if constants.SAVE_RESULT_TO_EXCEL_ALLOWED:
         with pd.ExcelWriter('temporary/result.xlsx', mode='a') as writer:
             dfHourlyResults.to_excel(writer,
                                      sheet_name='Hourly Results (' + archetype[:4] + '.)',
@@ -4484,7 +4135,6 @@ def x07GetAvailableArea(parameters: list,
     Returns:
         tuple
     """
-
     index = next((i for i, value in enumerate(parameters) if value is not None), -1)
     if index == 2:
         capex = parameters[index]
@@ -4565,7 +4215,7 @@ def x09GetPVProduction(rows: list,
         lon, lat = region['Median_Radiation_X'], region['Median_Radiation_Y']
 
         # Convert coordinates from EPSG:3035 to EPSG:4326
-        if constants.CONVERT_COORD or lat > 180: 
+        if constants.CONVERT_COORD or lat > 180:
             lon, lat = x11GetCoordinates(region)
 
         pot_MW = (region['Area_m2'] * landUse) / 1.0e+06
@@ -4578,21 +4228,37 @@ def x09GetPVProduction(rows: list,
 
         prod = []
         for i in range(len(porcent)):
-            df, params, meta = pvlib.iotools.get_pvgis_hourly(latitude=lat,
-                                                              longitude=lon,
-                                                              start=year,
-                                                              end=year,
-                                                              raddatabase='PVGIS-SARAH2',
-                                                              surface_tilt=tilt,
-                                                              surface_azimuth=distribAzimuth[i],
-                                                              pvcalculation=True,
-                                                              peakpower=pot_MW * 1000 * porcent[i],
-                                                              trackingtype=tracking,
-                                                              loss=loss,
-                                                              components=False,
-                                                              url='https://re.jrc.ec.europa.eu/api/v5_2/')
-            prod.append(df['P'])
-
+            try:
+                # Try to use the primary database: PVGIS-SARAH2
+                df, params, meta = pvlib.iotools.get_pvgis_hourly(latitude=lat,
+                                                                  longitude=lon,
+                                                                  start=year,
+                                                                  end=year,
+                                                                  raddatabase=constants.RADIATION_DATABASE_PRIMARY,
+                                                                  surface_tilt=tilt,
+                                                                  surface_azimuth=distribAzimuth[i],
+                                                                  pvcalculation=True,
+                                                                  peakpower=pot_MW * 1000 * porcent[i],
+                                                                  trackingtype=tracking,
+                                                                  loss=loss,
+                                                                  components=False,
+                                                                  url=constants.RADIATION_DATABASE_URL)
+            except requests.HTTPError as e:
+                # If the coordinates don't fit with the primary database, use the secondary one: PVGIS-ERA5
+                df, params, meta = pvlib.iotools.get_pvgis_hourly(latitude=lat,
+                                                                  longitude=lon,
+                                                                  start=year,
+                                                                  end=year,
+                                                                  raddatabase=constants.RADIATION_DATABASE_SECONDARY,
+                                                                  surface_tilt=tilt,
+                                                                  surface_azimuth=distribAzimuth[i],
+                                                                  pvcalculation=True,
+                                                                  peakpower=pot_MW * 1000 * porcent[i],
+                                                                  trackingtype=tracking,
+                                                                  loss=loss,
+                                                                  components=False,
+                                                                  url=constants.RADIATION_DATABASE_URL)
+        
         region['production'] = (pd.DataFrame(prod).sum(axis=0)) * factor / 1.0e+06  # to MW
         production.append((pd.DataFrame(prod).sum(axis=0) * factor / 1.0e+06))  # to MW
 

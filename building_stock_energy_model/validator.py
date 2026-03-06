@@ -55,9 +55,9 @@ def validateCommandLineParameters(parameters: list):
             [
                 "building_energy_process.py",
                 "input.json",
-                "2019-03-01T13:00:00",
-                "2019-03-02T13:00:00",
-                "Offices"
+                "2019-03-01T13:00:00"  (Optional),
+                "2019-03-02T13:00:00"  (Optional),
+                "Offices"  (Optional)
             ]
     
     Returns:
@@ -66,37 +66,39 @@ def validateCommandLineParameters(parameters: list):
     """
 
     # Validate the parameters
-    if len(parameters) != 5:
+    if len(parameters) != 2 and len(parameters) != 5:
         raise Exception(
-            'Validator/>  The number of input parameters is incorrect! (5)')
+            'Validator/>  The number of input parameters is incorrect! (2 or 5)')
 
     # Validate if the payload file exists
     if not os.path.exists(parameters[1].strip()):
         raise Exception(
             'Validator/>  The process input data file does not exist!')
 
-    # Validate the datetime objects
-    try:
-        datetime.strptime(parameters[2],
-                          '%Y-%m-%dT%H:%M:%S')
-    except ValueError:
-        raise Exception(
-            'Validator/>  The third input parameter (start datetime) has an incorrect format (yyyy-MM-ddTHH:mm:ss)')
-    try:
-        datetime.strptime(parameters[3],
-                          '%Y-%m-%dT%H:%M:%S')
-    except ValueError:
-        raise Exception(
-            'Validator/>  The fourth input parameter (end datetime) has an incorrect format (yyyy-MM-ddTHH:mm:ss)')
-    if (parameters[3] <= parameters[2]):
-        raise Exception(
-            'Validator/>  The end time cannot be less than the start time!')
+    # Validate the datetime objects (if they exist)
+    if len(parameters) == 5:
+        if parameters[2] and parameters[3]:
+            try:
+                datetime.strptime(parameters[2],
+                                '%Y-%m-%dT%H:%M:%S')
+            except ValueError:
+                raise Exception(
+                    'Validator/>  The third input parameter (start datetime) has an incorrect format (yyyy-MM-ddTHH:mm:ss)')
+            try:
+                datetime.strptime(parameters[3],
+                                '%Y-%m-%dT%H:%M:%S')
+            except ValueError:
+                raise Exception(
+                    'Validator/>  The fourth input parameter (end datetime) has an incorrect format (yyyy-MM-ddTHH:mm:ss)')
+            if (parameters[3] <= parameters[2]):
+                raise Exception(
+                    'Validator/>  The end time cannot be less than the start time!')
 
-    # Validate the building use
-    if not parameters[4] or not parameters[4].strip() or parameters[4].strip() not in constants.BUILDING_USES:
-        raise Exception('Validator/>  The building use must be one of the following: '
-                        '"Apartment Block", "Single family- Terraced houses", "Hotels and Restaurants",'
-                        '"Health", "Education", "Offices", "Trade", "Other non-residential buildings", "Sport"')
+        # Validate the building use (if it exists)
+        if parameters[4] and parameters[4].strip() and parameters[4].strip() not in constants.BUILDING_USES:
+            raise Exception('Validator/>  The building use must be one of the following: '
+                            '"Apartment Block", "Single family- Terraced houses", "Hotels and Restaurants",'
+                            '"Health", "Education", "Offices", "Trade", "Other non-residential buildings", "Sport"')
 
 
 # Function: Validate the integrity of the database
@@ -135,9 +137,14 @@ def validateProcessPayload(payload: dict) -> dict:
     if not 'nutsid' in payload or payload['nutsid'] is None:
         raise Exception(
             'Validator/>  The following property is not present or has a null value: "nutsid"')
-    if payload['nutsid'].strip().upper() not in constants.REGION_LIST:
+    nutsids = payload['nutsid'].split(',')
+    if not nutsids:
         raise Exception(
             'Validator/>  The following property has an invalid value: "nutsid"')
+    for nutsid in nutsids:
+        if nutsid.strip().upper() not in constants.REGION_LIST:
+            raise Exception(
+                'Validator/>  The following property has an invalid region: "nutsid"')
 
     # Validate the property: year
     if not 'year' in payload or payload['year'] is None:

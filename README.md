@@ -1,6 +1,6 @@
 # iDesignRES: Building Stock Energy Model
 
-[![Docs](https://img.shields.io/badge/docs-stable-brightgreen)](https://idesignres.github.io/Tecnalia_Building-Stock-Energy-Model/)
+[![Docs](https://img.shields.io/badge/docs-stable-brightgreen)](https://molinuevo.github.io/molinuevobuildings)
 
 This README provides an overview of the Model iDesignRES Building Stock Energy Model within iDesignRES.
 
@@ -119,16 +119,24 @@ poetry install
 Once installed, execute the *Building Stock Energy Model* entering the command:
 
 ```
+poetry run python building_energy_process.py input.json
+```
+
+This command performs the **complete** execution of the model, obtaining the annual results for all building uses. These results will be stored in the [results ](usecases/results) directory, in a JSON file corresponding to the applied region.
+
+However, if it is desired to run the model limiting the results to a specific period of the year for a particular building use, it can be done as follows:
+
+```
 poetry run python building_energy_process.py <input_payload> <start_time> <end_time> <building_use>
 ```
 
-For example 
+For example:
 
 ```
 poetry run python building_energy_process.py input.json 2019-01-01T00:00:00 2019-01-07T23:00:00 "Offices"
 ```
 
-This command automatically runs the simulation, taking the necessary input data from the *[usecases](usecases)* folder and the *[input.json](input.json)* file.
+This commands take the necessary input data from the *[usecases](usecases)* folder and the *[input.json](input.json)* file.
 
 ## Testing and code coverage
 
@@ -153,10 +161,16 @@ With a resulting code coverage of 92%:
 | Name                  | Stmts    | Miss    | Cover   |
 | --------------------- | -------- | ------- | ------- |
 | modules/_ *init _*.py | 0        | 0       | 100%    |
-| modules/constants.py  | 11       | 0       | 100%    |
-| modules/model.py      | 1038     | 89      | 91%     |
-| modules/validator.py  | 534      | 33      | 94%     |
-| **TOTAL**             | **1583** | **122** | **92%** |
+| modules/constants.py  | 19       | 0       | 100%    |
+| modules/model.py      | 1063     | 94      | 91%     |
+| modules/validator.py  | 540      | 34      | 94%     |
+| **TOTAL**             | **1622** | **128** | **92%** |
+
+The command used to run these tests is the following: 
+
+```
+poetry run pytest --cov=building_stock_energy_model --cov-report=term-missing
+```
 
 ## Full example
 
@@ -164,4 +178,4 @@ To review a complete example of the model, access [this directory](example/READM
 
 ## Documentation
 
-To review the complete model documentation, access [here](https://idesignres.github.io/Tecnalia_Building-Stock-Energy-Model/).
+To review the complete model documentation, access [this directory](docs/README.md).
