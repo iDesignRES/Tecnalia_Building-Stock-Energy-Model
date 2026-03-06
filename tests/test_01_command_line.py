@@ -152,7 +152,26 @@ def test_missingCommandLineParameters():
 
 
 # Test -> The command line parameters are OK
-def test_commandLineParametersOK():
+def test_commandLineThreeParametersOK():
+    '''
+    Test -> The command line parameters are OK.
+    Input parameters:
+        None.
+    '''
+
+    exceptionsRaised = 0
+    try:
+        parameters = ['building_energy_process.py',
+                      TEST_INPUT_PATH]
+        validator.validateCommandLineParameters(parameters)
+    except Exception as e:
+        exceptionsRaised += 1
+
+    assert exceptionsRaised == 0
+
+
+# Test -> The command line parameters are OK
+def test_commandLineFiveParametersOK():
     '''
     Test -> The command line parameters are OK.
     Input parameters:

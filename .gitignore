@@ -14,4 +14,5 @@
 **/.pytest_cache/
 **/volumes/
 **/temporary/
+**/usecases/results/*.json
 docs/build/

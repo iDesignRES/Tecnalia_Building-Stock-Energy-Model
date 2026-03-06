@@ -71,9 +71,6 @@
         "distribution": [0.6,0.2,0.2]
     },
     "Other non-residential buildings": {
-        "area_total": null,
-        "power": 74.930,
-        "capex": null,
         "tilt": 30,
         "azimuth": 180,
         "loss": 14,

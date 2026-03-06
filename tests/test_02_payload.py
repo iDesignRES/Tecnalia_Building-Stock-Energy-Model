@@ -23,6 +23,7 @@ from pathlib import Path
 
 
 TEST_INPUT_PATH = str(Path(__file__).parent / 'input_test.json')
+TEST_EXTRA_REGION = ',NO07'
 exceptionsRaised = 0
 
 
@@ -68,10 +69,10 @@ def test_wrongValuesPayload():
     assert exceptionsRaised > 0
 
 
-# Test -> Valid payload
-def test_validPayload():
+# Test -> Valid payload with one region
+def test_validPayloadWithOneRegion():
     '''
-    Test -> Valid payload.
+    Test -> Valid payload with one region.
     Input parameters:
         None.
     '''
@@ -83,6 +84,30 @@ def test_validPayload():
     # Load the payload file
     with open(TEST_INPUT_PATH, 'r') as payloadFile:
         processPayload = json.load(payloadFile)
+        try:
+            validator.validateProcessPayload(processPayload)
+        except Exception as e:
+            exceptionsRaised += 1
+
+    assert exceptionsRaised == 0
+
+
+# Test -> Valid payload with several regions
+def test_validPayloadWittSeveralRegions():
+    '''
+    Test -> Valid payload with several regions.
+    Input parameters:
+        None.
+    '''
+
+    # Reset the exceptions counter
+    global exceptionsRaised
+    exceptionsRaised = 0
+
+    # Load the payload file
+    with open(TEST_INPUT_PATH, 'r') as payloadFile:
+        processPayload = json.load(payloadFile)
+        processPayload['nutsid'] += TEST_EXTRA_REGION
         try:
             validator.validateProcessPayload(processPayload)
         except Exception as e:
