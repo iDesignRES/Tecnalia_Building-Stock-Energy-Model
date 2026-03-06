@@ -1418,6 +1418,13 @@ The file can be edited to apply a custom configuration of the scenario to be exe
 	   - "High"
 	3) The sum of all the Energy Systems in each section must add up to 1.
 
+Finally, it should be noted that the simulation can be launched for more than one region. To do this, simply edit the first line of the input.json file and specify all the regions separated by commas:
+
+	{
+    	"nutsid": "ES21,ES22,ES23",
+    	"year": 2019,
+    	"scenario": {
+
 Once all the input data is configured, the next step is to proceed with execution. Assuming that the model is already installed with Poetry, execute the command:
 
 	poetry run python building_energy_process.py <input_payload> <start_time> <end_time> <building_use>
@@ -1828,3 +1835,5 @@ When execution is launched, a full input validation is performed. And when the e
 			5655.633678052537
 		]
 	}
+
+This result is stored as a JSON file in the "results" directory.

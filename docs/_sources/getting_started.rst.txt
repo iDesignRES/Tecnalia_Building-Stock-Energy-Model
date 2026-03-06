@@ -38,6 +38,12 @@ Execution
 
 Once installed, execute the Building Stock Energy Model entering the command:
 
+	poetry run python building_energy_process.py input.json
+
+This command performs the complete execution of the model, obtaining the annual results for all building uses. These results will be stored in the results  directory, in a JSON file corresponding to the applied region.
+
+However, if it is desired to run the model limiting the results to a specific period of the year for a particular building use, it can be done as follows:
+
 	poetry run python building_energy_process.py <input_payload> <start_time> <end_time> <building_use>
 
 For example:
