@@ -32,6 +32,7 @@ from openpyxl.styles import Alignment, Color, Font, PatternFill
 
 
 warnings.simplefilter(action='ignore', category=PerformanceWarning)
+warnings.filterwarnings('ignore', category=FutureWarning, message=".*'H' is deprecated.*")
 
 
 # Function: Build. Energy Sim. -> Model -> Step 01 : Load the previous result
@@ -161,15 +162,13 @@ def s02RetrieveTemperatures(nutsId: str,
         new_index = x05RemapYear(src.index,
                                  year)
         src.index = new_index
-        if isleap(year):
-            src = x01AddFeb29IfMissingForTemperaturesData(src,
-                                                          year)
-    else:
-        # If the target year is not a leap year, ensure that February 29th
-        # does not exist (it was already removed above)
-        # If it is a leap year and February 29th is missing,
-        # it's possible to add it (optional)
-        pass
+        
+    if isleap(year):
+        src = x01AddFeb29IfMissingForTemperaturesData(src,
+                                                      year)
+    
+    # Rename the index
+    src.index.name = "time"
 
     # Consistent time series data for the year "year" in the selected region column
     df = src.rename(columns={selectedRegion: 'HourlyTemperature'}).copy()
@@ -335,6 +334,7 @@ def s03RetrieveRadiationValues(nutsId: str,
 
 # Function: Build. Energy Sim. -> Model -> Step 04 -> Load the database
 def s04LoadDatabase(nutsId: str,
+                    year: int,
                     hddReduction: float,
                     cddReduction: float)-> tuple:
     """Model Step 04: Load the database.
@@ -342,6 +342,7 @@ def s04LoadDatabase(nutsId: str,
     Args:
         nutsId (str): Identifier of NUTS2 region for which the
             analysis will be carried out.
+        year (int): The selected year.
         hddReduction (float): Reduction in heating degree days
             for future scenario.
         cddReduction (float): Reduction in cooling degree days
@@ -375,11 +376,22 @@ def s04LoadDatabase(nutsId: str,
                                  sep=';',
                                  decimal=',',
                                  thousands='.')
+
     filePath = Path(__file__).parent.parent / 'database' / '18-Schedule.csv'
     dfSchedule = pd.read_csv(filePath,
                              sep=';',
                              decimal=',',
                              thousands='.')
+    dfSchedule["Datetime"] = pd.to_datetime(dfSchedule["Datetime"], dayfirst=True)
+    dfSchedule["Datetime"] = dfSchedule["Datetime"].apply(lambda x: x.replace(year=year))
+    if isleap(year):
+        df28 = dfSchedule[(dfSchedule["Datetime"].dt.day == 28) & (dfSchedule["Datetime"].dt.month == 2)].copy()
+        df29 = df28.copy()
+        df29["Datetime"] = df29["Datetime"].apply(lambda d: d.replace(day=29))
+        dfSchedule = pd.concat([dfSchedule, df29], ignore_index=True)
+        dfSchedule = dfSchedule.sort_values(by=["Use", "Datetime"]).reset_index(drop=True)
+    dfSchedule["Datetime"] = dfSchedule["Datetime"].dt.strftime("%d/%m/%Y %H:%M")
+    
     filePath = Path(__file__).parent.parent / \
         'database' / '15-RES_hh_tes.xlsx'
     dfResHHTes = pd.read_excel(filePath)
@@ -1133,13 +1145,6 @@ def s08AddActiveMeasures(dfCSV: pd.DataFrame,
                 measure['appliances']['electricity']
             ]
         else:
-            # dfCSV['SH. Natural gas']=dfCSV.apply(
-            #         lambda row: dfReshhtes[dfReshhtes['Energy service_Fuel']
-            #                                == 'Space heating_Natural gas'].values[0][2]
-            #         if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Residential')
-            #         else (dfSerhhtes[dfSerhhtes['Energy service_Fuel'] == 'Space heating_Natural gas'].values[0][2]
-            #               if (row['Use'] == measure['building_use']) and (row['Sector'] == 'Service')
-            #               else row['SH. Natural gas']), axis=1)
             dfCSV = dfCSV.assign(
                 **{
                     # Space heating (for Residential and Service sectors)
@@ -3725,6 +3730,7 @@ def s21CalculateConsolidate(dictSchedule: dict,
     # Create the Consolidated dataframe
     print('Model: Step 21/>  Building the Consolidated (' +
           archetype + ') dataframe...')
+    shape = len(list(dictSchedule.items())[0][1]['schedule'])
     dfConsolidated = pd.DataFrame(0.0, columns=['Solids|Coal (Space Heating)', 'Liquids|Gas (Space Heating)',
                                                 'Liquids|Oil (Space Heating)', 'Gases|Gas (Space Heating)', 'Solids|Biomass (Space Heating)',
                                                 'Electricity (Space Heating)', 'Heat (Space Heating)', 'Liquids|Biomass (Space Heating)',
@@ -3743,7 +3749,7 @@ def s21CalculateConsolidate(dictSchedule: dict,
                                                 'Gases|Biomass (Appliances)', 'Hydrogen (Appliances)', 'Heat|Solar (Appliances)',
                                                 'Solids|Coal (Cooking)', 'Liquids|Gas (Cooking)', 'Liquids|Oil (Cooking)', 'Gases|Gas (Cooking)',
                                                 'Solids|Biomass (Cooking)', 'Electricity (Cooking)', 'Heat (Cooking)', 'Liquids|Biomass (Cooking)',
-                                                'Gases|Biomass (Cooking)', 'Hydrogen (Cooking)', 'Heat|Solar (Cooking)'], index=range(8760))
+                                                'Gases|Biomass (Cooking)', 'Hydrogen (Cooking)', 'Heat|Solar (Cooking)'], index=range(shape))
 
     for key, dictValue in dictSchedule.items():
         if dictValue['use'] == archetype:
@@ -3845,9 +3851,10 @@ def s22CalculateHourlyResults(dfCSV: pd.DataFrame,
     # Create the Hourly Results dataframe
     print('Model: Step 22/>  Building the Hourly Results (' +
           archetype + ') dataframe...')
+    shape = len(list(dictSchedule.items())[0][1]['schedule'])
     dfHourlyResults = pd.DataFrame(0.0, columns=['Solids|Coal', 'Liquids|Gas', 'Liquids|Oil',
                                                  'Gases|Gas', 'Solids|Biomass', 'Electricity', 'Heat', 'Liquids|Biomass', 'Gases|Biomass', 'Hydrogen',
-                                                 'Heat|Solar', 'Variable cost [€]', 'Emissions [kgCO2]'], index=range(8760))
+                                                 'Heat|Solar', 'Variable cost [€]', 'Emissions [kgCO2]'], index=range(shape))
 
     for key, dictValue in dictSchedule.items():
         if dictValue['use'] == archetype:
