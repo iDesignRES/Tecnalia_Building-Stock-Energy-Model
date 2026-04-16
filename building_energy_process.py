@@ -130,6 +130,7 @@ def executeModel(currentNutsId: str, modelPayload: dict) -> dict:
         dfBesCapex, dfBesOpex, dfRes, dfBesCapacity, \
         dfRetroCost, dfSolarOffice, dfSolarNoffice, \
         dfDwellings, dfRTHHEff, dictDBBuildings = model.s04LoadDatabase(currentNutsId,
+                                                                        modelPayload['year'],
                                                                         modelPayload['scenario']['hdd_reduction'],
                                                                         modelPayload['scenario']['cdd_reduction'])
     print('')
